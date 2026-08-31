@@ -6,6 +6,25 @@ public static class MonitorInfoParser
 {
     private static readonly string[] ModelIdPrefixes = ["MON", "ANC"];
 
+    public static string ExtractHardwareId(string deviceId)
+    {
+        if (string.IsNullOrWhiteSpace(deviceId))
+            return string.Empty;
+
+        string normalized = deviceId.Replace('#', '\\');
+        foreach (string part in normalized.Split('\\', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (part.Length == 7 &&
+                part[..3].All(char.IsLetter) &&
+                part[3..].All(Uri.IsHexDigit))
+            {
+                return part.ToUpperInvariant();
+            }
+        }
+
+        return string.Empty;
+    }
+
     public static string ExtractModelFromDeviceId(string deviceId)
     {
         if (string.IsNullOrWhiteSpace(deviceId))
@@ -25,6 +44,14 @@ public static class MonitorInfoParser
         return string.Empty;
     }
 
+    public static string FormatRefreshRate(double refreshRateHz)
+    {
+        if (refreshRateHz <= 0)
+            return string.Empty;
+
+        return $"{refreshRateHz.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)} Hz";
+    }
+
     public static bool IsExternalMonitorByDeviceId(string deviceId)
     {
         return !deviceId.Contains("ldu", StringComparison.OrdinalIgnoreCase) &&
@@ -41,7 +68,8 @@ public static class MonitorInfoParser
             targetName.targetProductDescription);
         var deviceId = DisplayInterop.CharArrayToString(
             targetName.targetMonitoredDeviceId);
-        var model = ExtractModelFromDeviceId(deviceId);
+        var hardwareId = ExtractHardwareId(deviceId);
+        var model = FirstNonEmpty(ExtractModelFromDeviceId(deviceId), hardwareId);
 
         return new MonitorInfo
         {
@@ -52,6 +80,9 @@ public static class MonitorInfoParser
                 deviceId,
                 $"Monitor ({fallbackKey})"),
             ModelName = model,
+            HardwareId = hardwareId,
+            ManufacturerCode = hardwareId.Length >= 3 ? hardwareId[..3] : string.Empty,
+            EdidProductCode = targetName.edidProductCodeId,
             OutputTechnology = outputTechnology
         };
     }
@@ -62,7 +93,8 @@ public static class MonitorInfoParser
         string deviceId,
         string deviceString)
     {
-        var model = ExtractModelFromDeviceId(subId);
+        var hardwareId = ExtractHardwareId(subId);
+        var model = FirstNonEmpty(ExtractModelFromDeviceId(subId), hardwareId);
 
         return new MonitorInfo
         {
@@ -72,7 +104,9 @@ public static class MonitorInfoParser
                 model,
                 deviceString,
                 $"Monitor ({deviceId})"),
-            ModelName = model
+            ModelName = model,
+            HardwareId = hardwareId,
+            ManufacturerCode = hardwareId.Length >= 3 ? hardwareId[..3] : string.Empty
         };
     }
 
@@ -81,6 +115,7 @@ public static class MonitorInfoParser
         (string deviceString, string deviceId, string parentName) deviceInfo)
     {
         var (deviceString, deviceId, parentName) = deviceInfo;
+        var hardwareId = ExtractHardwareId(deviceId);
         var friendlyName = string.Equals(
             deviceString, parentName, StringComparison.OrdinalIgnoreCase)
                 ? monitorDeviceName
@@ -91,7 +126,9 @@ public static class MonitorInfoParser
             DevicePath = monitorDeviceName,
             DisplayName = monitorDeviceName,
             FriendlyName = friendlyName,
-            ModelName = ExtractModelFromDeviceId(deviceId)
+            ModelName = FirstNonEmpty(ExtractModelFromDeviceId(deviceId), hardwareId),
+            HardwareId = hardwareId,
+            ManufacturerCode = hardwareId.Length >= 3 ? hardwareId[..3] : string.Empty
         };
     }
 

@@ -1,24 +1,72 @@
 {
-  "$schema": "https://opencode.ai/config.json",
-  "model": "local/qwen3.6-27b",
-  "provider": {
-    "local": {
-      "npm": "@ai-sdk/openai-compatible",
-      "name": "Local llama.cpp",
-      "options": {
-        "baseURL": "http://192.168.0.96:8080/v1",
-        "apiKey": "local"
-      },
-      "models": {
-        "qwen3.6-27b": {
-          "name": "Qwen3.6 27B (local)",
-          "id": "..\\..\\..\\models\\unsloth\\Qwen3.6-27B-GGUF\\Qwen3.6-27B-UD-Q4_K_XL.gguf",
-          "limit": {
-            "context": 100096,
-            "output": 8192
-          }
+    "$schema": "https://opencode.ai/config.json",
+    "model": "llamacpp/unsloth/Qwen3.8-27B-UD-Q5_K_XL",
+    "mcp": {
+        "jira": {
+            "type": "remote",
+            "url": "https://mcp.atlassian.com/v1/mcp/authv2",
+            "enabled": true
         }
-      }
+    },
+    "agent": {
+        "build": {
+            "permission": {
+                "jira_*": "deny"
+            }
+        },
+        "factory-jira": {
+            "description": "Performs one bounded Jira MCP operation and returns its structured result.",
+            "mode": "primary",
+            "steps": 4,
+            "prompt": "You are a bounded Jira operation agent. Use the configured Jira MCP server only. If required, make one read-only cloud/resource lookup, then make at most one requested Jira mutation. After the mutation tool returns, immediately emit the requested JSON; do not call the mutation tool again, even if it reports an error. For description edits, prefer a plain Markdown string directly in fields.description. If the MCP error explicitly says an object was supplied with contentFormat markdown and recommends ADF, correct that payload by using contentFormat adf with one valid ADF document object. If the mutation fails, include its exact error in the structured result and stop. Return exactly one JSON object matching the requested schema.",
+            "permission": {
+                "read": "deny",
+                "edit": "deny",
+                "bash": "deny",
+                "glob": "deny",
+                "grep": "deny",
+                "list": "deny",
+                "task": "deny",
+                "webfetch": "deny",
+                "websearch": "deny",
+                "question": "deny",
+                "jira_*": "allow"
+            }
+        }
+    },
+    "formatter": true,
+    "compaction": {
+        "auto": true,
+        "prune": true,
+        "reserved": 10000
+    },
+    "provider": {
+        "llamacpp": {
+            "name": "llama.cpp (local)",
+            "options": {
+                "baseURL": "http://192.168.0.96:8080/v1",
+                "apiKey": "local"
+            },
+            "models": {
+                "unsloth/Qwen3.8-27B-UD-Q4_K_XL": {
+                    "name": "Qwen3.8-27B-UD-Q4_K_XL",
+                    "repeat_penalty": 1.0,
+                    "temp": 1.0,
+                    "min_probability": 0,
+                    "top_k": 20,
+                    "presence_penalty": 0.0,
+                    "top_p": 0.95,
+                    "modalities": {
+                        "input": [
+                            "text",
+                            "image"
+                        ],
+                        "output": [
+                            "text"
+                        ]
+                    }
+                }
+            }
+        }
     }
-  }
 }

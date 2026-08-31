@@ -38,6 +38,30 @@ public class BrightnessController : IBrightnessController
             stopAfterSuccess: false);
     }
 
+    public uint? GetVcpFeatureValue(MonitorInfo monitor, byte vcpCode)
+    {
+        uint? value = null;
+        VisitPhysicalMonitors(
+            monitor,
+            physicalMonitor =>
+            {
+                if (!DisplayInterop.GetVCPFeatureAndVCPFeatureReply(
+                        physicalMonitor.hPhysicalMonitor,
+                        vcpCode,
+                        out _,
+                        out uint currentValue,
+                        out _))
+                {
+                    return false;
+                }
+
+                value = currentValue;
+                return true;
+            },
+            stopAfterSuccess: true);
+        return value;
+    }
+
     private static bool VisitPhysicalMonitors(
         MonitorInfo monitor,
         Func<DisplayInterop.PHYSICAL_MONITOR, bool> visitor,

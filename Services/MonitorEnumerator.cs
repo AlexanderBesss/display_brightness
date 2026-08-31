@@ -74,8 +74,11 @@ public class MonitorEnumerator
 
                 var monitorDeviceName = miex.szDevice.TrimEnd('\0');
                 deviceMap.TryGetValue(monitorDeviceName, out var info);
-                monitors.Add(MonitorInfoParser.CreateMonitorFromEnumMonitors(
-                    monitorDeviceName, info));
+                var monitor = MonitorInfoParser.CreateMonitorFromEnumMonitors(
+                    monitorDeviceName, info);
+                monitor.RefreshRateHz = DisplayInterop.GetDeviceRefreshRateHz(
+                    monitorDeviceName);
+                monitors.Add(monitor);
 
                 return true;
             }
@@ -188,9 +191,11 @@ public class MonitorEnumerator
             {
                 try
                 {
-                    var (adapterId, targetId, outputTech) = DisplayInterop.ReadTargetInfoRaw(
-                        pathPtr, (int)i,
-                        Marshal.SizeOf<DisplayInterop.DISPLAYCONFIG_PATH_INFO>());
+                    var (adapterId, targetId, outputTech,
+                        refreshNumerator, refreshDenominator) =
+                        DisplayInterop.ReadTargetInfoRaw(
+                            pathPtr, (int)i,
+                            Marshal.SizeOf<DisplayInterop.DISPLAYCONFIG_PATH_INFO>());
 
                     // Keep every currently supported connector type, including
                     // USB-C/indirect wired displays and internal panels.
@@ -213,6 +218,9 @@ public class MonitorEnumerator
                     {
                         monitor.DisplayName = GetSourceDisplayName(
                             pathPtr, (int)i);
+                        monitor.RefreshRateHz = refreshDenominator > 0
+                            ? (double)refreshNumerator / refreshDenominator
+                            : 0;
                         monitors.Add(monitor);
                     }
                 }

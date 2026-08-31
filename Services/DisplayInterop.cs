@@ -19,6 +19,8 @@ public static class DisplayInterop
     public const uint DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME = 2;
     public const uint DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME = 1;
 
+    public const int ENUM_CURRENT_SETTINGS = -1;
+
     public const uint DISPLAY_DEVICE_ATTACHED_TO_DESKTOP = 0x00000001;
     public const uint DISPLAY_DEVICE_MIRRORING_DRIVER = 0x00000008;
     public const uint DISPLAY_DEVICE_ACTIVE = 0x00000001;
@@ -59,6 +61,12 @@ public static class DisplayInterop
     public static extern bool GetMonitorInfoW(
         IntPtr hMonitor,
         ref MONITORINFOEX lpmi);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern bool EnumDisplaySettingsW(
+        string? lpDeviceName,
+        int iModeNum,
+        ref DEVMODEW lpDevMode);
 
     [DllImport("dxva2.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -204,6 +212,20 @@ public static class DisplayInterop
         public string viewGdiDeviceName;
     }
 
+    // Only the fields required for the refresh-rate lookup are declared.
+    // dmSize sits at offset 68 and dmDisplayFrequency at offset 184.
+    [StructLayout(LayoutKind.Explicit, Size = 188)]
+    public struct DEVMODEW
+    {
+        [FieldOffset(0)]
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+        public string dmDeviceName;
+        [FieldOffset(68)]
+        public ushort dmSize;
+        [FieldOffset(184)]
+        public uint dmDisplayFrequency;
+    }
+
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     public struct DISPLAY_DEVICEW
     {
@@ -301,8 +323,10 @@ public static class DisplayInterop
         }
     }
 
-    // Read target info from raw bytes at known offsets
-    public static (ulong adapterId, uint targetId, uint outputTechnology)
+    // Read target info from raw bytes at known offsets. The refresh rate is
+    // the target's current mode, expressed as a rational (numerator/denominator).
+    public static (ulong adapterId, uint targetId, uint outputTechnology,
+        uint refreshNumerator, uint refreshDenominator)
         ReadTargetInfoRaw(IntPtr pathPtr, int pathIndex, int pathSize)
     {
         var basePtr = pathPtr + pathIndex * pathSize;
@@ -310,6 +334,24 @@ public static class DisplayInterop
         var adapterId = (ulong)Marshal.ReadInt64(basePtr + 20);
         var targetId = (uint)Marshal.ReadInt32(basePtr + 28);
         var outputTechnology = (uint)Marshal.ReadInt32(basePtr + 36);
-        return (adapterId, targetId, outputTechnology);
+        var refreshNumerator = (uint)Marshal.ReadInt32(basePtr + 48);
+        var refreshDenominator = (uint)Marshal.ReadInt32(basePtr + 52);
+        return (adapterId, targetId, outputTechnology,
+            refreshNumerator, refreshDenominator);
+    }
+
+    // Actual refresh rate (Hz) of the current mode on a GDI device such as
+    // "\\.\DISPLAY1". Returns 0 when the rate cannot be determined.
+    public static double GetDeviceRefreshRateHz(string deviceName)
+    {
+        var devMode = new DEVMODEW
+        {
+            dmDeviceName = deviceName,
+            dmSize = (ushort)Marshal.SizeOf<DEVMODEW>()
+        };
+        if (!EnumDisplaySettingsW(deviceName, ENUM_CURRENT_SETTINGS, ref devMode))
+            return 0;
+
+        return devMode.dmDisplayFrequency;
     }
 }

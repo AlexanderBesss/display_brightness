@@ -10,6 +10,8 @@ public class MainWindowViewModel : ViewModelBase
 {
     private readonly DisplayService _displayService;
     private readonly StorageService _storageService;
+    private readonly IOledCareService _oledCareService;
+    private readonly IUserDialogService _dialogService;
     private Dictionary<string, int> _savedSettings = new();
 
     private bool _startOnStartup;
@@ -47,10 +49,16 @@ public class MainWindowViewModel : ViewModelBase
     };
 
     public ICommand RefreshCommand { get; }
-    public MainWindowViewModel(DisplayService? displayService = null, StorageService? storageService = null)
+    public MainWindowViewModel(
+        DisplayService? displayService = null,
+        StorageService? storageService = null,
+        IOledCareService? oledCareService = null,
+        IUserDialogService? dialogService = null)
     {
         _displayService = displayService ?? new DisplayService();
         _storageService = storageService ?? new StorageService();
+        _oledCareService = oledCareService ?? new OledCareService();
+        _dialogService = dialogService ?? new UserDialogService();
 
         RefreshCommand = new RelayCommand(_ => LoadMonitors());
         _startOnStartup = _storageService.GetStartOnStartup();
@@ -66,6 +74,8 @@ public class MainWindowViewModel : ViewModelBase
             _savedSettings = _storageService.LoadSettings();
             ClearMonitors();
 
+            string? primaryDisplayName = System.Windows.Forms.Screen.PrimaryScreen?.DeviceName;
+
             foreach (var monitor in monitors)
             {
                 var initialBrightness = _displayService.GetBrightness(monitor)
@@ -76,7 +86,14 @@ public class MainWindowViewModel : ViewModelBase
                 var vm = new MonitorSliderViewModel(
                     monitor,
                     initialBrightness,
-                    brightness => CommitBrightness(monitor, brightness));
+                    brightness => CommitBrightness(monitor, brightness),
+                    _oledCareService,
+                    _dialogService);
+
+                vm.IsPrimary = string.Equals(
+                    monitor.DisplayName,
+                    primaryDisplayName,
+                    StringComparison.OrdinalIgnoreCase);
 
                 vm.PropertyChanged += Monitor_PropertyChanged;
                 Monitors.Add(vm);

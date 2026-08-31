@@ -1,0 +1,13 @@
+bin/
+obj/
+publish/
+*.user
+*.suo
+*.cache
+[Cc]ommon7/
+[Tt]emp/
+[Tt]est[Rr]esult*
+*.log
+.vs/
+.ipynb_checkpoints
+opencode.json

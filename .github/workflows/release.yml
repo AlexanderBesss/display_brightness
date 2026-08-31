@@ -1,0 +1,53 @@
+name: Publish Windows release
+
+on:
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: Build and publish EXE
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Publish self-contained application
+        run: >-
+          dotnet publish DisplayBrightness.csproj
+          --configuration Release
+          --runtime win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true
+          --output publish
+
+      - name: Create GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "build-$env:GITHUB_RUN_NUMBER"
+          if (gh release view $tag --repo "${{ github.repository }}" 2>$null) {
+            gh release upload $tag "publish/Brightness.exe" `
+              --repo "${{ github.repository }}" `
+              --clobber
+          }
+          else {
+            gh release create $tag "publish/Brightness.exe" `
+              --repo "${{ github.repository }}" `
+              --target "${{ github.sha }}" `
+              --title "Brightness build $env:GITHUB_RUN_NUMBER" `
+              --generate-notes
+          }

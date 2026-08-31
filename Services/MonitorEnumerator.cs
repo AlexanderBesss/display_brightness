@@ -3,130 +3,54 @@ using DisplayBrightness.Models;
 
 namespace DisplayBrightness.Services;
 
-public class MonitorEnumerator : IMonitorEnumerator
+public class MonitorEnumerator
 {
-    public List<MonitorInfo> Enumerate()
-    {
-        try
-        {
-            var monitors = TryGetMonitorsFromDisplayConfig();
-            if (monitors.Count > 0) return monitors;
-        }
-        catch
-        {
-        }
-
-        try
-        {
-            var monitors = GetMonitorsViaEnumDisplayMonitors();
-            if (monitors.Count > 0) return monitors;
-        }
-        catch
-        {
-        }
-
-        try
-        {
-            return GetMonitorsViaEnumDisplayDevices();
-        }
-        catch
-        {
-            return new List<MonitorInfo>();
-        }
-    }
-
-    public List<MonitorInfo> EnumerateSafe()
-    {
-        try
-        {
-            return Enumerate();
-        }
-        catch
-        {
-            return new List<MonitorInfo>();
-        }
-    }
+    private const uint MaxDisplayDevices = 16;
 
     public List<MonitorInfo> GetExternalMonitors()
     {
-        var monitors = EnumerateSafe();
+        var monitors = Enumerate();
 
-        if (monitors.Count > 0)
-        {
-            var external = monitors.Where(m =>
-                MonitorInfoParser.IsExternalMonitorByDeviceId(m.DevicePath) ||
-                DisplayInterop.IsExternalTechnology(m.OutputTechnology)).ToList();
-            if (external.Count > 0)
-                return external;
-        }
+        if (monitors.Count == 0)
+            return monitors;
 
-        return monitors;
+        var external = monitors.Where(monitor =>
+            MonitorInfoParser.IsExternalMonitorByDeviceId(monitor.DevicePath) ||
+            DisplayInterop.IsExternalTechnology(monitor.OutputTechnology)).ToList();
+
+        return external.Count > 0 ? external : monitors;
     }
 
-    private (ulong adapterId, uint targetId) TryGetAdapterTargetForMonitor(string monitorDeviceName)
+    private static List<MonitorInfo> Enumerate()
     {
-        (ulong adapterId, uint targetId) result = (0ul, 0u);
+        if (TryEnumerate(TryGetMonitorsFromDisplayConfig, out var monitors))
+            return monitors;
+
+        if (TryEnumerate(GetMonitorsViaEnumDisplayMonitors, out monitors))
+            return monitors;
+
+        return TryEnumerate(GetMonitorsViaEnumDisplayDevices, out monitors)
+            ? monitors
+            : new List<MonitorInfo>();
+    }
+
+    private static bool TryEnumerate(
+        Func<List<MonitorInfo>> enumerate,
+        out List<MonitorInfo> monitors)
+    {
         try
         {
-            DisplayInterop.QueryDisplayConfigPaths((pathPtr, numPaths) =>
-            {
-                try
-                {
-                    for (uint i = 0; i < numPaths; i++)
-                    {
-                        try
-                        {
-                            var path = Marshal.PtrToStructure<DisplayInterop.DISPLAYCONFIG_PATH_INFO>(
-                                pathPtr + (int)i * Marshal.SizeOf<DisplayInterop.DISPLAYCONFIG_PATH_INFO>());
-
-                            var ptr = Marshal.AllocHGlobal(
-                                Marshal.SizeOf<DisplayInterop.DISPLAYCONFIG_TARGET_NAME>());
-                            try
-                            {
-                                var targetName = CreateTargetNameStruct(
-                                    path.targetInfo.adapterId, path.targetInfo.id);
-
-                                Marshal.StructureToPtr(targetName, ptr, false);
-                                DisplayInterop.DisplayConfigGetDeviceInfo(ptr);
-                                targetName = Marshal.PtrToStructure<DisplayInterop.DISPLAYCONFIG_TARGET_NAME>(ptr);
-
-                                var deviceId = DisplayInterop.CharArrayToString(targetName.targetMonitoredDeviceId);
-                                var monitorName = DisplayInterop.CharArrayToString(
-                                    targetName.targetProductDescription);
-
-                                if (deviceId == monitorDeviceName ||
-                                    monitorName == monitorDeviceName ||
-                                    (deviceId.Length > 0 && deviceId.Contains(monitorDeviceName,
-                                        StringComparison.OrdinalIgnoreCase)))
-                                {
-                                    result = (path.targetInfo.adapterId, path.targetInfo.id);
-                                    return true;
-                                }
-                            }
-                            finally
-                            {
-                                Marshal.FreeHGlobal(ptr);
-                            }
-                        }
-                        catch
-                        {
-                        }
-                    }
-                }
-                catch
-                {
-                }
-                return true;
-            });
+            monitors = enumerate();
+            return monitors.Count > 0;
         }
         catch
         {
+            monitors = new List<MonitorInfo>();
+            return false;
         }
-
-        return result;
     }
 
-    private List<MonitorInfo> GetMonitorsViaEnumDisplayMonitors()
+    private static List<MonitorInfo> GetMonitorsViaEnumDisplayMonitors()
     {
         var monitors = new List<MonitorInfo>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -145,24 +69,13 @@ public class MonitorEnumerator : IMonitorEnumerator
                     return true;
 
                 var key = $"{lprc.Left},{lprc.Top},{lprc.Right},{lprc.Bottom}";
-                if (seen.Contains(key))
+                if (!seen.Add(key))
                     return true;
-                seen.Add(key);
 
                 var monitorDeviceName = miex.szDevice.TrimEnd('\0');
-                if (deviceMap.TryGetValue(monitorDeviceName, out var info))
-                {
-                    var monitor = MonitorInfoParser.CreateMonitorFromEnumMonitors(
-                        monitorDeviceName, info, 0ul, 0u);
-                    monitors.Add(monitor);
-                }
-                else
-                {
-                    var emptyInfo = (string.Empty, string.Empty, string.Empty);
-                    var monitor = MonitorInfoParser.CreateMonitorFromEnumMonitors(
-                        monitorDeviceName, emptyInfo, 0ul, 0u);
-                    monitors.Add(monitor);
-                }
+                deviceMap.TryGetValue(monitorDeviceName, out var info);
+                monitors.Add(MonitorInfoParser.CreateMonitorFromEnumMonitors(
+                    monitorDeviceName, info));
 
                 return true;
             }
@@ -172,43 +85,32 @@ public class MonitorEnumerator : IMonitorEnumerator
             }
         }
 
-        var proc = new DisplayInterop.MonitorEnumProc(EnumCallback);
-        try
-        {
-            DisplayInterop.EnumDisplayMonitors(
-                IntPtr.Zero, IntPtr.Zero, proc, IntPtr.Zero);
-        }
-        catch
-        {
-        }
+        var callback = new DisplayInterop.MonitorEnumProc(EnumCallback);
+        DisplayInterop.EnumDisplayMonitors(
+            IntPtr.Zero, IntPtr.Zero, callback, IntPtr.Zero);
 
         return monitors;
     }
 
-    private Dictionary<string, (string deviceString, string deviceId, string deviceName)>
+    private static Dictionary<string, (string deviceString, string deviceId, string deviceName)>
         BuildDeviceNameMap()
     {
-        var map = new Dictionary<string, (string, string, string)>();
+        var map = new Dictionary<string, (string, string, string)>(
+            StringComparer.OrdinalIgnoreCase);
 
         // First, try the standard approach: enumerate GPUs, then their monitors
-        for (uint i = 0; i < 16; i++)
+        for (uint i = 0; i < MaxDisplayDevices; i++)
         {
-            var dd = new DisplayInterop.DISPLAY_DEVICEW();
-            dd.cb = (uint)Marshal.SizeOf<DisplayInterop.DISPLAY_DEVICEW>();
+            var dd = CreateDisplayDevice();
 
             if (!DisplayInterop.EnumDisplayDevicesW(null, i, ref dd, 0))
-                continue;
+                break;
 
             var gpuName = dd.DeviceName.TrimEnd('\0');
-            var gpuString = dd.DeviceString.TrimEnd('\0');
-            var gpuId = dd.DeviceID.TrimEnd('\0');
-            var gpuFlags = dd.StateFlags;
-            var isMirroring = (gpuFlags & DisplayInterop.DISPLAY_DEVICE_MIRRORING_DRIVER) != 0;
             // Try to enumerate monitors attached to this device
-            for (uint j = 0; j < 16; j++)
+            for (uint j = 0; j < MaxDisplayDevices; j++)
             {
-                var dd2 = new DisplayInterop.DISPLAY_DEVICEW();
-                dd2.cb = (uint)Marshal.SizeOf<DisplayInterop.DISPLAY_DEVICEW>();
+                var dd2 = CreateDisplayDevice();
 
                 if (!DisplayInterop.EnumDisplayDevicesW(gpuName, j, ref dd2, 0))
                     break;
@@ -231,13 +133,12 @@ public class MonitorEnumerator : IMonitorEnumerator
         // If no monitors found at second level, try treating first-level devices as monitors
         if (map.Count == 0)
         {
-            for (uint i = 0; i < 16; i++)
+            for (uint i = 0; i < MaxDisplayDevices; i++)
             {
-                var dd = new DisplayInterop.DISPLAY_DEVICEW();
-                dd.cb = (uint)Marshal.SizeOf<DisplayInterop.DISPLAY_DEVICEW>();
+                var dd = CreateDisplayDevice();
 
                 if (!DisplayInterop.EnumDisplayDevicesW(null, i, ref dd, 0))
-                    continue;
+                    break;
 
                 var devName = dd.DeviceName.TrimEnd('\0');
                 var devString = dd.DeviceString.TrimEnd('\0');
@@ -252,15 +153,13 @@ public class MonitorEnumerator : IMonitorEnumerator
                 var monitorString = devString;
 
                 // Check if this has child devices that are actual monitors
-                for (uint j = 0; j < 16; j++)
+                for (uint j = 0; j < MaxDisplayDevices; j++)
                 {
-                    var dd2 = new DisplayInterop.DISPLAY_DEVICEW();
-                    dd2.cb = (uint)Marshal.SizeOf<DisplayInterop.DISPLAY_DEVICEW>();
+                    var dd2 = CreateDisplayDevice();
 
                     if (!DisplayInterop.EnumDisplayDevicesW(devName, j, ref dd2, 0x40)) // EDDI_GET_DEVICE_INTERFACE_NAME
                         continue;
 
-                    var childName = dd2.DeviceName.TrimEnd('\0');
                     var childString = dd2.DeviceString.TrimEnd('\0');
                     var childId = dd2.DeviceID.TrimEnd('\0');
                     if (!string.IsNullOrEmpty(childId))
@@ -278,116 +177,55 @@ public class MonitorEnumerator : IMonitorEnumerator
         return map;
     }
 
-    private List<MonitorInfo> TryGetMonitorsFromDisplayConfig()
+    private static List<MonitorInfo> TryGetMonitorsFromDisplayConfig()
     {
         var monitors = new List<MonitorInfo>();
         var seen = new HashSet<string>();
 
         DisplayInterop.QueryDisplayConfigPaths((pathPtr, numPaths) =>
         {
-            try
+            for (uint i = 0; i < numPaths; i++)
             {
-                for (uint i = 0; i < numPaths; i++)
+                try
                 {
-                    try
+                    var (adapterId, targetId, outputTech) = DisplayInterop.ReadTargetInfoRaw(
+                        pathPtr, (int)i,
+                        Marshal.SizeOf<DisplayInterop.DISPLAYCONFIG_PATH_INFO>());
+
+                    // Keep every currently supported connector type, including
+                    // USB-C/indirect wired displays and internal panels.
+                    if (outputTech >
+                            DisplayInterop.DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DISPLAYPORT_USB_TUNNEL &&
+                        outputTech !=
+                            DisplayInterop.DISPLAYCONFIG_OUTPUT_TECHNOLOGY_INTERNAL)
                     {
-                        var (adapterId, targetId, outputTech) = DisplayInterop.ReadTargetInfoRaw(
-                            pathPtr, (int)i,
-                            Marshal.SizeOf<DisplayInterop.DISPLAYCONFIG_PATH_INFO>());
-
-                        // Keep every currently supported connector type, including
-                        // USB-C/indirect wired displays and internal panels.
-                        if (outputTech >
-                                DisplayInterop.DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DISPLAYPORT_USB_TUNNEL &&
-                            outputTech !=
-                                DisplayInterop.DISPLAYCONFIG_OUTPUT_TECHNOLOGY_INTERNAL)
-                        {
-                            continue;
-                        }
-
-                        var key = $"{adapterId}:{targetId}";
-                        if (seen.Contains(key))
-                            continue;
-                        seen.Add(key);
-
-                        var monitor = GetMonitorFromTarget(
-                            adapterId, targetId,
-                            key, outputTech);
-                        if (monitor != null)
-                        {
-                            monitor.DisplayName = GetSourceDisplayName(
-                                pathPtr, (int)i);
-                            monitor.OutputTechnology = outputTech;
-                            monitors.Add(monitor);
-                        }
+                        continue;
                     }
-                    catch
+
+                    var key = $"{adapterId}:{targetId}";
+                    if (!seen.Add(key))
+                        continue;
+
+                    var monitor = GetMonitorFromTarget(
+                        adapterId, targetId,
+                        key, outputTech);
+                    if (monitor != null)
                     {
+                        monitor.DisplayName = GetSourceDisplayName(
+                            pathPtr, (int)i);
+                        monitors.Add(monitor);
                     }
                 }
+                catch
+                {
+                }
             }
-            catch
-            {
-            }
-            return true;
         });
 
         return monitors;
     }
 
-    private List<MonitorInfo> TryGetMonitorsFromDisplayConfig2()
-    {
-        var monitors = new List<MonitorInfo>();
-        var seen = new HashSet<string>();
-
-        DisplayInterop.QueryDisplayConfigPaths2((pathPtr, numPaths) =>
-        {
-            try
-            {
-                for (uint i = 0; i < numPaths; i++)
-                {
-                    try
-                    {
-                        var path = Marshal.PtrToStructure<DisplayInterop.DISPLAYCONFIG_2_PATH_INFO>(
-                            pathPtr + (int)i * Marshal.SizeOf<DisplayInterop.DISPLAYCONFIG_2_PATH_INFO>());
-
-                        if (path.targetInfo.id == 0)
-                            continue;
-
-                        if (path.targetInfo.outputTechnology > 11)
-                        {
-                            continue;
-                        }
-
-                        var key = $"{path.targetInfo.adapterId}:{path.targetInfo.id}";
-                        if (seen.Contains(key))
-                            continue;
-                        seen.Add(key);
-
-                        var monitor = GetMonitorFromTarget(
-                            path.targetInfo.adapterId, path.targetInfo.id,
-                            key, path.targetInfo.outputTechnology);
-                        if (monitor != null)
-                        {
-                            monitor.OutputTechnology = path.targetInfo.outputTechnology;
-                            monitors.Add(monitor);
-                        }
-                    }
-                    catch
-                    {
-                    }
-                }
-            }
-            catch
-            {
-            }
-            return true;
-        });
-
-        return monitors;
-    }
-
-    private MonitorInfo? GetMonitorFromTarget(
+    private static MonitorInfo? GetMonitorFromTarget(
         ulong adapterId, uint targetId, string fallbackKey, uint outputTech)
     {
         var ptr = Marshal.AllocHGlobal(
@@ -405,7 +243,7 @@ public class MonitorEnumerator : IMonitorEnumerator
 
             targetName = Marshal.PtrToStructure<DisplayInterop.DISPLAYCONFIG_TARGET_NAME>(ptr);
             return MonitorInfoParser.CreateMonitorFromTargetName(
-                targetName, adapterId, targetId, fallbackKey, outputTech);
+                targetName, fallbackKey, outputTech);
         }
         finally
         {
@@ -448,18 +286,17 @@ public class MonitorEnumerator : IMonitorEnumerator
         }
     }
 
-    private List<MonitorInfo> GetMonitorsViaEnumDisplayDevices()
+    private static List<MonitorInfo> GetMonitorsViaEnumDisplayDevices()
     {
         var monitors = new List<MonitorInfo>();
         var gpuDevices = new List<DisplayInterop.DISPLAY_DEVICEW>();
 
-        for (uint i = 0; i < 16; i++)
+        for (uint i = 0; i < MaxDisplayDevices; i++)
         {
-            var dd = new DisplayInterop.DISPLAY_DEVICEW();
-            dd.cb = (uint)Marshal.SizeOf<DisplayInterop.DISPLAY_DEVICEW>();
+            var dd = CreateDisplayDevice();
 
             if (!DisplayInterop.EnumDisplayDevicesW(null, i, ref dd, 0))
-                continue;
+                break;
 
             if ((dd.StateFlags & DisplayInterop.DISPLAY_DEVICE_ATTACHED_TO_DESKTOP) == 0)
                 continue;
@@ -475,10 +312,9 @@ public class MonitorEnumerator : IMonitorEnumerator
             var deviceString = gpu.DeviceString.TrimEnd('\0');
             var deviceId = gpu.DeviceID.TrimEnd('\0');
 
-            for (uint j = 0; j < 16; j++)
+            for (uint j = 0; j < MaxDisplayDevices; j++)
             {
-                var dd2 = new DisplayInterop.DISPLAY_DEVICEW();
-                dd2.cb = (uint)Marshal.SizeOf<DisplayInterop.DISPLAY_DEVICEW>();
+                var dd2 = CreateDisplayDevice();
 
                 if (!DisplayInterop.EnumDisplayDevicesW(deviceName, j, ref dd2, 0))
                     break;
@@ -491,17 +327,21 @@ public class MonitorEnumerator : IMonitorEnumerator
                 if ((dd2.StateFlags & DisplayInterop.DISPLAY_DEVICE_ATTACHED_TO_DESKTOP) == 0)
                     continue;
 
-                var subName = dd2.DeviceName.TrimEnd('\0');
-                var displayConfigIds = TryGetAdapterTargetForMonitor(subName);
-
                 var monitor = MonitorInfoParser.CreateMonitorFromEnumDevices(
-                    subName, subString, subId, deviceId, deviceString,
-                    displayConfigIds.Item1, displayConfigIds.Item2);
+                    subString, subId, deviceId, deviceString);
                 monitors.Add(monitor);
             }
         }
 
         return monitors;
+    }
+
+    private static DisplayInterop.DISPLAY_DEVICEW CreateDisplayDevice()
+    {
+        return new DisplayInterop.DISPLAY_DEVICEW
+        {
+            cb = (uint)Marshal.SizeOf<DisplayInterop.DISPLAY_DEVICEW>()
+        };
     }
 
     internal static DisplayInterop.DISPLAYCONFIG_TARGET_NAME CreateTargetNameStruct(

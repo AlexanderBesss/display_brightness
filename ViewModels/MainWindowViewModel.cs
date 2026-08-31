@@ -1,11 +1,12 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Windows.Input;
+using DisplayBrightness.Models;
 using DisplayBrightness.Services;
 
 namespace DisplayBrightness.ViewModels;
 
-public class MainWindowViewModel : INotifyPropertyChanged
+public class MainWindowViewModel : ViewModelBase
 {
     private readonly DisplayService _displayService;
     private readonly StorageService _storageService;
@@ -17,28 +18,12 @@ public class MainWindowViewModel : INotifyPropertyChanged
         get => _startOnStartup;
         set
         {
-            if (_startOnStartup != value)
-            {
-                _startOnStartup = value;
-                OnPropertyChanged(nameof(StartOnStartup));
+            if (SetProperty(ref _startOnStartup, value))
                 _storageService.SetStartOnStartup(value);
-            }
         }
     }
 
-    private bool _noMonitors;
-    public bool NoMonitors
-    {
-        get => _noMonitors;
-        set
-        {
-            if (_noMonitors != value)
-            {
-                _noMonitors = value;
-                OnPropertyChanged(nameof(NoMonitors));
-            }
-        }
-    }
+    public bool NoMonitors => Monitors.Count == 0;
 
     public ObservableCollection<MonitorSliderViewModel> Monitors { get; } = new();
 
@@ -62,8 +47,8 @@ public class MainWindowViewModel : INotifyPropertyChanged
         _storageService = storageService ?? new StorageService();
 
         RefreshCommand = new RelayCommand(_ => LoadMonitors());
+        _startOnStartup = _storageService.GetStartOnStartup();
         LoadMonitors();
-        StartOnStartup = _storageService.GetStartOnStartup();
     }
 
     private void LoadMonitors()
@@ -72,9 +57,8 @@ public class MainWindowViewModel : INotifyPropertyChanged
         {
             var monitors = _displayService.GetExternalMonitors();
 
-            _savedSettings.Clear();
             _savedSettings = _storageService.LoadSettings();
-            Monitors.Clear();
+            ClearMonitors();
 
             foreach (var monitor in monitors)
             {
@@ -86,25 +70,34 @@ public class MainWindowViewModel : INotifyPropertyChanged
                 var vm = new MonitorSliderViewModel(
                     monitor,
                     initialBrightness,
-                    _storageService,
-                    _savedSettings,
-                    CreateSliderReleasedHandler(monitor));
+                    brightness => CommitBrightness(monitor, brightness));
 
                 vm.PropertyChanged += Monitor_PropertyChanged;
                 Monitors.Add(vm);
             }
 
-            NoMonitors = Monitors.Count == 0;
-            OnPropertyChanged(nameof(DisplayStatusText));
-            OnPropertyChanged(nameof(AverageBrightness));
+            NotifyMonitorSummaryChanged();
         }
         catch
         {
-            Monitors.Clear();
-            NoMonitors = true;
-            OnPropertyChanged(nameof(DisplayStatusText));
-            OnPropertyChanged(nameof(AverageBrightness));
+            ClearMonitors();
+            NotifyMonitorSummaryChanged();
         }
+    }
+
+    private void ClearMonitors()
+    {
+        foreach (var monitor in Monitors)
+            monitor.PropertyChanged -= Monitor_PropertyChanged;
+
+        Monitors.Clear();
+    }
+
+    private void NotifyMonitorSummaryChanged()
+    {
+        OnPropertyChanged(nameof(NoMonitors));
+        OnPropertyChanged(nameof(DisplayStatusText));
+        OnPropertyChanged(nameof(AverageBrightness));
     }
 
     private void Monitor_PropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -113,17 +106,10 @@ public class MainWindowViewModel : INotifyPropertyChanged
             OnPropertyChanged(nameof(AverageBrightness));
     }
 
-    private Action<MonitorSliderViewModel> CreateSliderReleasedHandler(Models.MonitorInfo monitor)
+    private void CommitBrightness(MonitorInfo monitor, int brightness)
     {
-        return vm =>
-        {
-            _displayService.SetBrightness(monitor, (int)vm.BrightnessValue);
-        };
-    }
-
-    public event PropertyChangedEventHandler? PropertyChanged;
-    protected void OnPropertyChanged(string name)
-    {
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+        _savedSettings[monitor.DevicePath] = brightness;
+        _storageService.SaveSettings(_savedSettings);
+        _displayService.SetBrightness(monitor, brightness);
     }
 }

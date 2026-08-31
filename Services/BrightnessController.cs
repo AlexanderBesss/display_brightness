@@ -15,6 +15,36 @@ public class BrightnessController : IBrightnessController
 
     public int? GetBrightness(MonitorInfo monitor)
     {
+        int? brightness = null;
+        VisitPhysicalMonitors(
+            monitor,
+            physicalMonitor =>
+            {
+                brightness = GetPhysicalMonitorBrightness(physicalMonitor);
+                return brightness.HasValue;
+            },
+            stopAfterSuccess: true);
+
+        return brightness;
+    }
+
+    public bool SetBrightness(MonitorInfo monitor, int brightness)
+    {
+        var clampedBrightness = Math.Clamp(brightness, 0, 100);
+        return VisitPhysicalMonitors(
+            monitor,
+            physicalMonitor => SetPhysicalMonitorBrightness(
+                physicalMonitor, clampedBrightness),
+            stopAfterSuccess: false);
+    }
+
+    private static bool VisitPhysicalMonitors(
+        MonitorInfo monitor,
+        Func<DisplayInterop.PHYSICAL_MONITOR, bool> visitor,
+        bool stopAfterSuccess)
+    {
+        var anySuccess = false;
+
         foreach (var logicalMonitor in FindLogicalMonitors(monitor))
         {
             if (!DisplayInterop.GetNumberOfPhysicalMonitorsFromHMONITOR(
@@ -34,54 +64,12 @@ public class BrightnessController : IBrightnessController
             {
                 foreach (var physicalMonitor in physicalMonitors)
                 {
-                    var brightness = GetPhysicalMonitorBrightness(physicalMonitor);
-                    if (brightness.HasValue)
-                        return brightness;
-                }
-            }
-            finally
-            {
-                DisplayInterop.DestroyPhysicalMonitors(count, physicalMonitors);
-            }
-        }
+                    if (!visitor(physicalMonitor))
+                        continue;
 
-        return null;
-    }
-
-    public bool SetBrightness(MonitorInfo monitor, int brightness)
-    {
-        brightness = Math.Clamp(brightness, 0, 100);
-        var logicalMonitors = FindLogicalMonitors(monitor);
-        if (logicalMonitors.Count == 0)
-            return false;
-
-        var anySuccess = false;
-        foreach (var logicalMonitor in logicalMonitors)
-        {
-            if (!DisplayInterop.GetNumberOfPhysicalMonitorsFromHMONITOR(
-                    logicalMonitor.Handle, out var count))
-            {
-                continue;
-            }
-
-            if (count == 0)
-            {
-                continue;
-            }
-
-            var physicalMonitors = new DisplayInterop.PHYSICAL_MONITOR[count];
-            if (!DisplayInterop.GetPhysicalMonitorsFromHMONITOR(
-                    logicalMonitor.Handle, count, physicalMonitors))
-            {
-                continue;
-            }
-
-            try
-            {
-                foreach (var physicalMonitor in physicalMonitors)
-                {
-                    anySuccess |= SetPhysicalMonitorBrightness(
-                        physicalMonitor, brightness, logicalMonitor.DeviceName);
+                    anySuccess = true;
+                    if (stopAfterSuccess)
+                        return true;
                 }
             }
             finally
@@ -116,13 +104,8 @@ public class BrightnessController : IBrightnessController
 
     private static bool SetPhysicalMonitorBrightness(
         DisplayInterop.PHYSICAL_MONITOR monitor,
-        int percentage,
-        string deviceName)
+        int percentage)
     {
-        var description = string.IsNullOrWhiteSpace(monitor.szPhysicalMonitorDescription)
-            ? "physical monitor"
-            : monitor.szPhysicalMonitorDescription.TrimEnd('\0');
-
         if (DisplayInterop.GetMonitorBrightness(
                 monitor.hPhysicalMonitor, out var minimum, out _, out var maximum) &&
             maximum >= minimum)

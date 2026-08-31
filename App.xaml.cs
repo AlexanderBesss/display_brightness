@@ -13,7 +13,7 @@ public partial class App : System.Windows.Application
     private System.Windows.Forms.NotifyIcon? _trayIcon;
     private System.Windows.Controls.ContextMenu? _trayMenu;
     private MainWindow? _mainWindow;
-    private bool _isExiting = false;
+    private bool _isExiting;
 
     private void App_OnStartup(object sender, StartupEventArgs e)
     {
@@ -49,7 +49,7 @@ public partial class App : System.Windows.Application
 
         _trayMenu = CreateTrayMenu();
 
-        _trayIcon.MouseClick += (s, args) =>
+        _trayIcon.MouseClick += (_, args) =>
         {
             if (args.Button == System.Windows.Forms.MouseButtons.Left)
             {
@@ -71,7 +71,7 @@ public partial class App : System.Windows.Application
             }
         };
 
-        _mainWindow.Closing += (s, e) =>
+        _mainWindow.Closing += (_, e) =>
         {
             if (!_isExiting)
             {
@@ -80,7 +80,7 @@ public partial class App : System.Windows.Application
             }
         };
 
-        _mainWindow.Closed += (s, e) =>
+        _mainWindow.Closed += (_, _) =>
         {
             if (_isExiting)
                 Shutdown();
@@ -179,6 +179,12 @@ public partial class App : System.Windows.Application
         icon?.Dispose();
         _trayIcon = null;
         _trayMenu = null;
+    }
+
+    protected override void OnExit(ExitEventArgs e)
+    {
+        DisposeTrayIcon();
+        base.OnExit(e);
     }
 
     [StructLayout(LayoutKind.Sequential)]

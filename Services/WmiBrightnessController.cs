@@ -37,19 +37,19 @@ public class WmiBrightnessController : IBrightnessController
             using var results = searcher.Get();
 
             var methods = results.Cast<ManagementObject>().ToList();
-            var target = methods.FirstOrDefault(method =>
-                InstanceMatches(method, instancePrefix));
-
-            // Some display drivers omit enough of the instance identifier to make
-            // an exact match impossible. A single active laptop panel is still an
-            // unambiguous target.
-            target ??= methods.Count == 1 ? methods[0] : null;
-            if (target == null)
-                return false;
-
-            using (target)
-            using (var input = target.GetMethodParameters("WmiSetBrightness"))
+            try
             {
+                var target = methods.FirstOrDefault(method =>
+                    InstanceMatches(method, instancePrefix));
+
+                // Some display drivers omit enough of the instance identifier to make
+                // an exact match impossible. A single active laptop panel is still an
+                // unambiguous target.
+                target ??= methods.Count == 1 ? methods[0] : null;
+                if (target == null)
+                    return false;
+
+                using var input = target.GetMethodParameters("WmiSetBrightness");
                 input["Timeout"] = 0u;
                 input["Brightness"] = (byte)brightness;
 
@@ -57,6 +57,10 @@ public class WmiBrightnessController : IBrightnessController
                 // succeeds, so success is confirmed by reading the brightness back.
                 using var ignoredResult = target.InvokeMethod(
                     "WmiSetBrightness", input, null);
+            }
+            finally
+            {
+                DisposeAll(methods);
             }
 
             var current = ReadCurrentBrightness(scope, instancePrefix);
@@ -81,17 +85,27 @@ public class WmiBrightnessController : IBrightnessController
         using var results = searcher.Get();
 
         var brightnessObjects = results.Cast<ManagementObject>().ToList();
-        var target = brightnessObjects.FirstOrDefault(item =>
-            InstanceMatches(item, instancePrefix));
-        target ??= brightnessObjects.Count == 1 ? brightnessObjects[0] : null;
-
-        if (target == null)
-            return null;
-
-        using (target)
+        try
         {
+            var target = brightnessObjects.FirstOrDefault(item =>
+                InstanceMatches(item, instancePrefix));
+            target ??= brightnessObjects.Count == 1 ? brightnessObjects[0] : null;
+
+            if (target == null)
+                return null;
+
             return Convert.ToInt32(target["CurrentBrightness"]);
         }
+        finally
+        {
+            DisposeAll(brightnessObjects);
+        }
+    }
+
+    private static void DisposeAll(IEnumerable<ManagementObject> objects)
+    {
+        foreach (var item in objects)
+            item.Dispose();
     }
 
     private static bool InstanceMatches(

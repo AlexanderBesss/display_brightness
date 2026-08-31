@@ -4,21 +4,12 @@ namespace DisplayBrightness.Services;
 
 public class DisplayService
 {
-    private readonly IMonitorEnumerator _enumerator = new MonitorEnumerator();
+    private readonly MonitorEnumerator _enumerator = new();
     private readonly IBrightnessController _brightnessController = new BrightnessController();
     private readonly IBrightnessController _wmiController = new WmiBrightnessController();
 
-    public List<MonitorInfo> GetExternalMonitors()
-    {
-        try
-        {
-            return _enumerator.GetExternalMonitors();
-        }
-        catch
-        {
-            return new List<MonitorInfo>();
-        }
-    }
+    public List<MonitorInfo> GetExternalMonitors() =>
+        _enumerator.GetExternalMonitors();
 
     public int? GetBrightness(MonitorInfo monitor)
     {

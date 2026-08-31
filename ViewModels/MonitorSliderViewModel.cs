@@ -1,17 +1,11 @@
-using System;
-using System.ComponentModel;
 using DisplayBrightness.Models;
-using DisplayBrightness.Services;
 
 namespace DisplayBrightness.ViewModels;
 
-public class MonitorSliderViewModel : INotifyPropertyChanged
+public class MonitorSliderViewModel : ViewModelBase
 {
-    private readonly StorageService _storageService;
-    private readonly Dictionary<string, int> _savedSettings;
-    private readonly Action<MonitorSliderViewModel> _onSliderReleased;
+    private readonly Action<int> _commitBrightness;
 
-    public string DevicePath { get; }
     public string FriendlyName { get; }
     public string ModelName { get; }
 
@@ -21,12 +15,8 @@ public class MonitorSliderViewModel : INotifyPropertyChanged
         get => _brightnessValue;
         set
         {
-            if (_brightnessValue != value)
-            {
-                _brightnessValue = value;
-                OnPropertyChanged(nameof(BrightnessValue));
+            if (SetProperty(ref _brightnessValue, value))
                 OnPropertyChanged(nameof(BrightnessText));
-            }
         }
     }
 
@@ -35,35 +25,16 @@ public class MonitorSliderViewModel : INotifyPropertyChanged
     public MonitorSliderViewModel(
         MonitorInfo monitor,
         int initialBrightness,
-        StorageService storageService,
-        Dictionary<string, int> savedSettings,
-        Action<MonitorSliderViewModel> onSliderReleased)
+        Action<int> commitBrightness)
     {
-        DevicePath = monitor.DevicePath;
         FriendlyName = monitor.FriendlyName;
         ModelName = monitor.ModelName;
         _brightnessValue = Math.Clamp(initialBrightness, 0, 100);
-        _storageService = storageService;
-        _savedSettings = savedSettings;
-        _onSliderReleased = onSliderReleased;
-
-    }
-
-    private void SaveBrightness()
-    {
-        _savedSettings[DevicePath] = (int)BrightnessValue;
-        _storageService.SaveSettings(_savedSettings);
-        _onSliderReleased(this);
+        _commitBrightness = commitBrightness;
     }
 
     public void CommitBrightness()
     {
-        SaveBrightness();
-    }
-
-    public event PropertyChangedEventHandler? PropertyChanged;
-    protected void OnPropertyChanged(string name)
-    {
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+        _commitBrightness((int)BrightnessValue);
     }
 }

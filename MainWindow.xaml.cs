@@ -8,6 +8,8 @@ using System.Windows.Media;
 using System.Windows.Media.Media3D;
 using System.Windows.Media.Animation;
 using DisplayBrightness.ViewModels;
+using WpfButtonBase = System.Windows.Controls.Primitives.ButtonBase;
+using WpfTextBoxBase = System.Windows.Controls.Primitives.TextBoxBase;
 
 namespace DisplayBrightness;
 
@@ -198,10 +200,10 @@ public partial class MainWindow : Window
     {
         for (var current = element; current != null; current = GetParent(current))
         {
-            if (current is System.Windows.Controls.Primitives.ButtonBase or
+            if (current is WpfButtonBase or
                 RangeBase or
                 Thumb or
-                System.Windows.Controls.Primitives.TextBoxBase)
+                WpfTextBoxBase)
             {
                 return true;
             }
@@ -217,18 +219,13 @@ public partial class MainWindow : Window
             : LogicalTreeHelper.GetParent(element);
     }
 
-    private void CloseButton_Click(object sender, RoutedEventArgs e)
-    {
-        Close();
-    }
+    private void CloseButton_Click(object sender, RoutedEventArgs e) => Close();
 
-    private void Slider_MouseUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    private void Slider_MouseUp(object sender, MouseButtonEventArgs e)
     {
         if (sender is Slider slider && slider.DataContext is MonitorSliderViewModel vm)
         {
             vm.CommitBrightness();
         }
     }
-
-
 }

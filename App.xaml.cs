@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -11,7 +12,7 @@ public partial class App : System.Windows.Application
 {
     private System.Windows.Forms.NotifyIcon? _trayIcon;
     private System.Windows.Controls.ContextMenu? _trayMenu;
-    private Window? _mainWindow;
+    private MainWindow? _mainWindow;
     private bool _isExiting = false;
 
     private void App_OnStartup(object sender, StartupEventArgs e)
@@ -31,7 +32,6 @@ public partial class App : System.Windows.Application
     private void StartApp()
     {
         _mainWindow = new MainWindow();
-        _mainWindow.Show();
 
         var viewModel = (MainWindowViewModel)_mainWindow.DataContext;
         _trayIcon = new System.Windows.Forms.NotifyIcon
@@ -62,9 +62,7 @@ public partial class App : System.Windows.Application
                 }
                 else
                 {
-                    _mainWindow.Show();
-                    _mainWindow.Activate();
-                    _mainWindow.Focus();
+                    _mainWindow.ShowNearTray(System.Windows.Forms.Cursor.Position);
                 }
             }
             else if (args.Button == System.Windows.Forms.MouseButtons.Right)
@@ -87,6 +85,24 @@ public partial class App : System.Windows.Application
             if (_isExiting)
                 Shutdown();
         };
+
+        _mainWindow.ShowNearTray(GetInitialTrayPoint());
+    }
+
+    private static System.Drawing.Point GetInitialTrayPoint()
+    {
+        var taskbar = FindWindow("Shell_TrayWnd", null);
+        if (taskbar != IntPtr.Zero && GetWindowRect(taskbar, out var rect))
+        {
+            var horizontal = rect.Right - rect.Left >= rect.Bottom - rect.Top;
+            return horizontal
+                ? new System.Drawing.Point(rect.Right - 24, rect.Top + (rect.Bottom - rect.Top) / 2)
+                : new System.Drawing.Point(rect.Left + (rect.Right - rect.Left) / 2, rect.Bottom - 24);
+        }
+
+        var workArea = System.Windows.Forms.Screen.PrimaryScreen?.WorkingArea
+            ?? System.Windows.Forms.SystemInformation.WorkingArea;
+        return new System.Drawing.Point(workArea.Right - 24, workArea.Bottom - 1);
     }
 
     private void UpdateTrayIcon(int? brightness)
@@ -164,4 +180,20 @@ public partial class App : System.Windows.Application
         _trayIcon = null;
         _trayMenu = null;
     }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr FindWindow(string className, string? windowName);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetWindowRect(IntPtr windowHandle, out NativeRect rect);
 }

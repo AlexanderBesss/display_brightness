@@ -36,14 +36,13 @@ try {
     }
 
     # Publish
-    Write-Host "[4/4] Publishing (Release, win-x64, self-contained)..." -ForegroundColor Yellow
+    Write-Host "[4/4] Publishing (Release, win-x64, small single file)..." -ForegroundColor Yellow
     dotnet publish "$ProjectDir" `
         -c Release `
         -r win-x64 `
-        --self-contained true `
+        --self-contained false `
         -p:PublishSingleFile=true `
-        -p:IncludeNativeLibrariesForSelfExtract=true `
-        -p:EnableCompressionInSingleFile=true `
+        -p:PublishReadyToRun=false `
         -o "$PublishDir"
 
     if ($LASTEXITCODE -ne 0) {
@@ -56,6 +55,7 @@ try {
     Write-Host "  Build successful!" -ForegroundColor Green
     Write-Host "  Output: $PublishDir" -ForegroundColor Green
     Write-Host "========================================" -ForegroundColor Green
+    Write-Host "  Requires: .NET 8 Desktop Runtime x64" -ForegroundColor Yellow
 
     $exe = Get-ChildItem "$PublishDir\Brightness.exe"
     if ($exe) {

@@ -213,7 +213,7 @@
         </Style>
     </Window.Resources>
 
-    <Border Margin="20" Background="{StaticResource WindowBrush}" BorderBrush="#313746" BorderThickness="1" CornerRadius="18">
+    <Border x:Name="WindowChrome" Margin="20" Background="{StaticResource WindowBrush}" BorderBrush="#313746" BorderThickness="1" CornerRadius="18">
         <Border.Effect>
             <DropShadowEffect BlurRadius="18" ShadowDepth="2" Direction="270" Color="#000000" Opacity="0.32" RenderingBias="Quality"/>
         </Border.Effect>

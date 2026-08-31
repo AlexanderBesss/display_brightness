@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Media;
+using System.Windows.Threading;
 using DisplayBrightness.Services;
 using DisplayBrightness.ViewModels;
 
@@ -10,10 +11,14 @@ namespace DisplayBrightness;
 
 public partial class App : System.Windows.Application
 {
-    private System.Windows.Forms.NotifyIcon? _trayIcon;
+    private const int BrightnessStep = 2;
+
+    private NativeTrayIcon? _trayIcon;
     private System.Windows.Controls.ContextMenu? _trayMenu;
     private MainWindow? _mainWindow;
     private bool _isExiting;
+    private int _pendingWheelSteps;
+    private int _isWheelUpdateQueued;
 
     private void App_OnStartup(object sender, StartupEventArgs e)
     {
@@ -34,42 +39,41 @@ public partial class App : System.Windows.Application
         _mainWindow = new MainWindow();
 
         var viewModel = (MainWindowViewModel)_mainWindow.DataContext;
-        _trayIcon = new System.Windows.Forms.NotifyIcon
-        {
-            Icon = TrayBrightnessIcon.Create(viewModel.AverageBrightness),
-            Text = GetTrayText(viewModel.AverageBrightness),
-            Visible = true
-        };
+        _trayIcon = new NativeTrayIcon(
+            TrayBrightnessIcon.Create(viewModel.AverageBrightness),
+            GetTrayText(viewModel.PrimaryBrightness));
+
+        _trayIcon.MouseWheel += detents =>
+            QueueBrightnessAdjustment(viewModel, detents);
+        _trayIcon.IsWheelEnabled = viewModel.CanAdjustBrightness;
 
         viewModel.PropertyChanged += (_, args) =>
         {
             if (args.PropertyName == nameof(MainWindowViewModel.AverageBrightness))
-                UpdateTrayIcon(viewModel.AverageBrightness);
+                UpdateTrayIcon(
+                    viewModel.AverageBrightness,
+                    viewModel.PrimaryBrightness);
+            else if (args.PropertyName == nameof(MainWindowViewModel.CanAdjustBrightness) &&
+                     _trayIcon != null)
+                _trayIcon.IsWheelEnabled = viewModel.CanAdjustBrightness;
         };
 
         _trayMenu = CreateTrayMenu();
 
-        _trayIcon.MouseClick += (_, args) =>
+        _mainWindow.Deactivated += (_, _) =>
         {
-            if (args.Button == System.Windows.Forms.MouseButtons.Left)
-            {
-                if (_trayMenu != null)
-                    _trayMenu.IsOpen = false;
-
-                if (_mainWindow!.IsVisible)
-                {
-                    _mainWindow.Hide();
-                }
-                else
-                {
-                    _mainWindow.ShowNearTray(System.Windows.Forms.Cursor.Position);
-                }
-            }
-            else if (args.Button == System.Windows.Forms.MouseButtons.Right)
-            {
-                ShowTrayMenu();
-            }
+            if (_trayIcon?.IsPointOverIcon(System.Windows.Forms.Cursor.Position) != true)
+                _mainWindow.Hide();
         };
+
+        _trayIcon.LeftClick += () =>
+        {
+            if (_trayMenu != null)
+                _trayMenu.IsOpen = false;
+
+            ToggleMainWindow();
+        };
+        _trayIcon.RightClick += ShowTrayMenu;
 
         _mainWindow.Closing += (_, e) =>
         {
@@ -86,7 +90,23 @@ public partial class App : System.Windows.Application
                 Shutdown();
         };
 
-        _mainWindow.ShowNearTray(GetInitialTrayPoint());
+        ShowMainWindow();
+    }
+
+    private void ShowMainWindow()
+    {
+        _mainWindow?.ShowNearTray(GetInitialTrayPoint());
+    }
+
+    private void ToggleMainWindow()
+    {
+        if (_mainWindow == null)
+            return;
+
+        if (_mainWindow.IsVisible)
+            _mainWindow.Hide();
+        else
+            _mainWindow.ShowNearTray(System.Windows.Forms.Cursor.Position);
     }
 
     private static System.Drawing.Point GetInitialTrayPoint()
@@ -105,19 +125,43 @@ public partial class App : System.Windows.Application
         return new System.Drawing.Point(workArea.Right - 24, workArea.Bottom - 1);
     }
 
-    private void UpdateTrayIcon(int? brightness)
+    private void UpdateTrayIcon(int? averageBrightness, int? primaryBrightness)
     {
         if (_trayIcon == null)
             return;
 
-        var previousIcon = _trayIcon.Icon;
-        _trayIcon.Icon = TrayBrightnessIcon.Create(brightness);
-        _trayIcon.Text = GetTrayText(brightness);
-        previousIcon?.Dispose();
+        _trayIcon.Update(
+            TrayBrightnessIcon.Create(averageBrightness),
+            GetTrayText(primaryBrightness));
+    }
+
+    private void QueueBrightnessAdjustment(
+        MainWindowViewModel viewModel,
+        int wheelDetents)
+    {
+        Interlocked.Add(ref _pendingWheelSteps, wheelDetents);
+        if (Interlocked.CompareExchange(ref _isWheelUpdateQueued, 1, 0) != 0)
+            return;
+
+        Dispatcher.InvokeAsync(
+            () => ApplyPendingBrightnessAdjustment(viewModel),
+            DispatcherPriority.Background);
+    }
+
+    private void ApplyPendingBrightnessAdjustment(MainWindowViewModel viewModel)
+    {
+        int wheelSteps = Interlocked.Exchange(ref _pendingWheelSteps, 0);
+        Interlocked.Exchange(ref _isWheelUpdateQueued, 0);
+
+        if (wheelSteps != 0)
+            viewModel.AdjustPrimaryBrightness(wheelSteps * BrightnessStep);
+
+        if (Volatile.Read(ref _pendingWheelSteps) != 0)
+            QueueBrightnessAdjustment(viewModel, 0);
     }
 
     private static string GetTrayText(int? brightness) => brightness.HasValue
-        ? $"Brightness - {brightness.Value}% average"
+        ? $"Main monitor brightness - {brightness.Value}%"
         : "Brightness - no controllable displays";
 
     private System.Windows.Controls.ContextMenu CreateTrayMenu()
@@ -170,13 +214,7 @@ public partial class App : System.Windows.Application
 
     private void DisposeTrayIcon()
     {
-        if (_trayIcon == null)
-            return;
-
-        var icon = _trayIcon.Icon;
-        _trayIcon.Visible = false;
-        _trayIcon.Dispose();
-        icon?.Dispose();
+        _trayIcon?.Dispose();
         _trayIcon = null;
         _trayMenu = null;
     }

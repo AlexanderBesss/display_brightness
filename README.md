@@ -13,6 +13,7 @@ the .NET 8 Desktop Runtime (x64).
 - Control brightness of external monitors (HDMI, DisplayPort, DVI, VGA, USB-C)
 - System tray integration with right-click Exit menu
 - Left-click tray icon to show/hide the window
+- Scroll over the tray icon to adjust the primary display by 2% per wheel notch
 - Persistent brightness settings per monitor
 - Optional startup with Windows
 
@@ -43,7 +44,8 @@ dotnet publish DisplayBrightness.csproj -c Release -r win-x64 --self-contained f
 ## Usage
 
 1. Left-click the tray icon to open the brightness control window
-2. Adjust sliders to set brightness per monitor
-3. Window auto-hides when clicking away
-4. Right-click tray icon to exit the application
-5. Enable "Start on startup" to launch with Windows
+2. Scroll over the tray icon to adjust the primary display brightness
+3. Adjust sliders to set brightness per monitor
+4. Window auto-hides when clicking away
+5. Right-click tray icon to exit the application
+6. Enable "Start on startup" to launch with Windows

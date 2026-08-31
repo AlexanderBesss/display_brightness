@@ -289,7 +289,7 @@
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
                                 <Border Margin="0,0,0,7" Padding="12" Background="{StaticResource CardBrush}" BorderBrush="{StaticResource BorderBrush}"
-                                        BorderThickness="1" CornerRadius="14">
+                                        BorderThickness="1" CornerRadius="14" PreviewMouseWheel="MonitorCard_MouseWheel">
                                     <Grid>
                                         <Grid.RowDefinitions>
                                             <RowDefinition Height="Auto"/>
@@ -327,7 +327,8 @@
                                             <Path Width="12" Height="12" Margin="0,0,9,0" VerticalAlignment="Center" Stretch="Uniform" Stroke="{StaticResource SubtleTextBrush}"
                                                   StrokeThickness="1.8" Data="M12,2 L12,5 M12,19 L12,22 M2,12 L5,12 M19,12 L22,12 M4.9,4.9 L7,7 M17,17 L19.1,19.1 M19.1,4.9 L17,7 M7,17 L4.9,19.1 M12,8 A4,4 0 1 1 11.9,8"/>
                                             <Slider Grid.Column="1" Style="{StaticResource ModernSliderStyle}" Minimum="0" Maximum="100"
-                                                    Value="{Binding BrightnessValue, Mode=TwoWay}" TickFrequency="1" IsSnapToTickEnabled="True" PreviewMouseUp="Slider_MouseUp"/>
+                                                    Value="{Binding BrightnessValue, Mode=TwoWay}" TickFrequency="1" IsSnapToTickEnabled="True"
+                                                    PreviewMouseUp="Slider_MouseUp"/>
                                             <Path Grid.Column="2" Width="16" Height="16" Margin="9,0,0,0" VerticalAlignment="Center" Stretch="Uniform" Stroke="{StaticResource MutedTextBrush}"
                                                   StrokeThickness="1.8" Data="M12,2 L12,5 M12,19 L12,22 M2,12 L5,12 M19,12 L22,12 M4.9,4.9 L7,7 M17,17 L19.1,19.1 M19.1,4.9 L17,7 M7,17 L4.9,19.1 M12,7 A5,5 0 1 1 11.9,7"/>
                                         </Grid>

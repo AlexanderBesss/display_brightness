@@ -25,6 +25,8 @@ public class MainWindowViewModel : ViewModelBase
 
     public bool NoMonitors => Monitors.Count == 0;
 
+    public bool CanAdjustBrightness => Monitors.Count > 0;
+
     public ObservableCollection<MonitorSliderViewModel> Monitors { get; } = new();
 
     public int? AverageBrightness => Monitors.Count == 0
@@ -32,6 +34,10 @@ public class MainWindowViewModel : ViewModelBase
         : (int)Math.Round(
             Monitors.Average(monitor => monitor.BrightnessValue),
             MidpointRounding.AwayFromZero);
+
+    public int? PrimaryBrightness => GetPrimaryBrightnessTarget() is { } target
+        ? (int)Math.Round(target.BrightnessValue, MidpointRounding.AwayFromZero)
+        : null;
 
     public string DisplayStatusText => Monitors.Count switch
     {
@@ -96,14 +102,42 @@ public class MainWindowViewModel : ViewModelBase
     private void NotifyMonitorSummaryChanged()
     {
         OnPropertyChanged(nameof(NoMonitors));
+        OnPropertyChanged(nameof(CanAdjustBrightness));
         OnPropertyChanged(nameof(DisplayStatusText));
         OnPropertyChanged(nameof(AverageBrightness));
+        OnPropertyChanged(nameof(PrimaryBrightness));
+    }
+
+    public bool AdjustPrimaryBrightness(int delta)
+    {
+        if (delta == 0 || GetPrimaryBrightnessTarget() is not { } target)
+            return false;
+
+        return target.AdjustBrightness(delta);
+    }
+
+    private MonitorSliderViewModel? GetPrimaryBrightnessTarget()
+    {
+        if (Monitors.Count == 0)
+            return null;
+
+        string? primaryDisplayName = System.Windows.Forms.Screen.PrimaryScreen?.DeviceName;
+        MonitorSliderViewModel? target = Monitors.FirstOrDefault(monitor =>
+            string.Equals(
+                monitor.DisplayName,
+                primaryDisplayName,
+                StringComparison.OrdinalIgnoreCase));
+
+        return target ?? Monitors[0];
     }
 
     private void Monitor_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(MonitorSliderViewModel.BrightnessValue))
+        {
             OnPropertyChanged(nameof(AverageBrightness));
+            OnPropertyChanged(nameof(PrimaryBrightness));
+        }
     }
 
     private void CommitBrightness(MonitorInfo monitor, int brightness)

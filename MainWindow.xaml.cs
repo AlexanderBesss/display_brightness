@@ -15,6 +15,8 @@ namespace DisplayBrightness;
 
 public partial class MainWindow : Window
 {
+    private const int BrightnessStep = 2;
+    private const int WheelDelta = 120;
     private const uint SwpNoActivate = 0x0010;
     private const uint SwpNoZOrder = 0x0004;
 
@@ -227,5 +229,22 @@ public partial class MainWindow : Window
         {
             vm.CommitBrightness();
         }
+    }
+
+    private void MonitorCard_MouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (sender is not Border monitorCard ||
+            monitorCard.DataContext is not MonitorSliderViewModel viewModel ||
+            e.Delta == 0)
+        {
+            return;
+        }
+
+        int wheelSteps = e.Delta / WheelDelta;
+        if (wheelSteps == 0)
+            wheelSteps = Math.Sign(e.Delta);
+
+        viewModel.AdjustBrightness(wheelSteps * BrightnessStep);
+        e.Handled = true;
     }
 }

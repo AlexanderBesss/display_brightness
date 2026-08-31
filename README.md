@@ -5,8 +5,8 @@ A lightweight Windows tray application for adjusting external monitor brightness
 ## Download
 
 Download `Brightness.exe` from the [latest GitHub release](../../releases/latest).
-The published application is self-contained, so the .NET runtime does not need to
-be installed separately.
+The published application is a small, framework-dependent executable and requires
+the .NET 8 Desktop Runtime (x64).
 
 ## Features
 
@@ -19,6 +19,7 @@ be installed separately.
 ## Requirements
 
 - Windows 10/11
+- .NET 8 Desktop Runtime (x64)
 - Administrator privileges (required for display brightness control)
 
 ## Build
@@ -33,10 +34,10 @@ dotnet build DisplayBrightness.csproj -c Release
 dotnet run --project DisplayBrightness.csproj -c Release
 ```
 
-## Publish (standalone)
+## Publish (small single file)
 
 ```bash
-dotnet publish DisplayBrightness.csproj -c Release -o publish /p:PublishSingleFile=true
+dotnet publish DisplayBrightness.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -p:PublishReadyToRun=false -o publish
 ```
 
 ## Usage

@@ -22,15 +22,14 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
-      - name: Publish self-contained application
+      - name: Publish framework-dependent application
         run: >-
           dotnet publish DisplayBrightness.csproj
           --configuration Release
           --runtime win-x64
-          --self-contained true
+          --self-contained false
           -p:PublishSingleFile=true
-          -p:IncludeNativeLibrariesForSelfExtract=true
-          -p:EnableCompressionInSingleFile=true
+          -p:PublishReadyToRun=false
           --output publish
 
       - name: Create GitHub release

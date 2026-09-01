@@ -95,7 +95,7 @@ public partial class App : System.Windows.Application
 
     private void ShowMainWindow()
     {
-        _mainWindow?.ShowNearTray(GetInitialTrayPoint());
+        _mainWindow?.ShowInBottomRight(GetInitialTrayPoint());
     }
 
     private void ToggleMainWindow()
@@ -109,7 +109,7 @@ public partial class App : System.Windows.Application
             return;
         }
 
-        _mainWindow.ShowNearTray(System.Windows.Forms.Cursor.Position);
+        _mainWindow.ShowInBottomRight(System.Windows.Forms.Cursor.Position);
 
         if (_mainWindow.DataContext is MainWindowViewModel viewModel)
         {

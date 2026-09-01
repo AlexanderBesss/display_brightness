@@ -57,7 +57,6 @@ public class MonitorSliderViewModel : ViewModelBase
         private set => SetProperty(ref _oledStatusText, value);
     }
 
-    public ICommand RefreshOledStatusCommand { get; }
     public ICommand RunPixelRefreshCommand { get; }
 
     private double _brightnessValue;
@@ -89,9 +88,6 @@ public class MonitorSliderViewModel : ViewModelBase
         _oledCareService = oledCareService;
         _dialogService = dialogService;
         OledSupportLevel = _oledCareService.GetSupportLevel(monitor);
-        RefreshOledStatusCommand = new AsyncRelayCommand(
-            RefreshOledStatusAsync,
-            () => ShowOledCare && !IsOledBusy);
         RunPixelRefreshCommand = new AsyncRelayCommand(
             RunPixelRefreshAsync,
             () => CanRunPixelRefresh);

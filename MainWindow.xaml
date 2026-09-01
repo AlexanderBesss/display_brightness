@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Brightness"
         Width="404"
-        Height="584"
+        SizeToContent="Height"
         ResizeMode="NoResize"
         WindowStartupLocation="CenterScreen"
         WindowStyle="None"
@@ -84,6 +84,43 @@
             </Setter>
         </Style>
 
+        <Style x:Key="PanelProtectIconButtonStyle" TargetType="Button">
+            <Setter Property="Width" Value="32"/>
+            <Setter Property="Height" Value="32"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Foreground" Value="#D2CEFF"/>
+            <Setter Property="Background" Value="#282548"/>
+            <Setter Property="BorderBrush" Value="#5D568F"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="ButtonChrome" Padding="{TemplateBinding Padding}"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="8">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ButtonChrome" Property="Background" Value="#35305E"/>
+                                <Setter TargetName="ButtonChrome" Property="BorderBrush" Value="{StaticResource PrimaryBrush}"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="ButtonChrome" Property="Background" Value="#211E3D"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="ButtonChrome" Property="Opacity" Value="0.45"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style x:Key="ModernSliderStyle" TargetType="Slider">
             <Setter Property="Foreground" Value="{StaticResource PrimaryBrush}"/>
             <Setter Property="Background" Value="#303543"/>
@@ -123,55 +160,6 @@
                                         </Thumb.Template>
                                     </Thumb>
                                 </Track.Thumb>
-                            </Track>
-                        </Grid>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
-        <Style x:Key="ModernScrollThumbStyle" TargetType="Thumb">
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Thumb">
-                        <Border x:Name="ThumbChrome" Margin="1,0" Background="#555D70" CornerRadius="3"/>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="ThumbChrome" Property="Background" Value="#747E95"/>
-                            </Trigger>
-                            <Trigger Property="IsDragging" Value="True">
-                                <Setter TargetName="ThumbChrome" Property="Background" Value="{StaticResource PrimaryBrush}"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
-        <Style TargetType="ScrollBar">
-            <Setter Property="Width" Value="7"/>
-            <Setter Property="Margin" Value="6,2,0,2"/>
-            <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="ScrollBar">
-                        <Grid Background="Transparent">
-                            <Track x:Name="PART_Track"
-                                   IsDirectionReversed="True"
-                                   Maximum="{TemplateBinding Maximum}"
-                                   Minimum="{TemplateBinding Minimum}"
-                                   Orientation="{TemplateBinding Orientation}"
-                                   Value="{TemplateBinding Value}"
-                                   ViewportSize="{TemplateBinding ViewportSize}">
-                                <Track.DecreaseRepeatButton>
-                                    <RepeatButton Command="ScrollBar.PageUpCommand" Opacity="0" Focusable="False"/>
-                                </Track.DecreaseRepeatButton>
-                                <Track.Thumb>
-                                    <Thumb MinHeight="28" Style="{StaticResource ModernScrollThumbStyle}"/>
-                                </Track.Thumb>
-                                <Track.IncreaseRepeatButton>
-                                    <RepeatButton Command="ScrollBar.PageDownCommand" Opacity="0" Focusable="False"/>
-                                </Track.IncreaseRepeatButton>
                             </Track>
                         </Grid>
                     </ControlTemplate>
@@ -259,15 +247,15 @@
                     <TextBlock Text="{Binding DisplayStatusText}" Margin="0,3,12,0" FontSize="11" Foreground="{StaticResource MutedTextBrush}" TextTrimming="CharacterEllipsis"/>
                 </StackPanel>
                 <Button Grid.Column="1" Width="36" Height="36" Padding="0" Style="{StaticResource PrimaryButtonStyle}"
-                        Command="{Binding RefreshCommand}" ToolTip="Scan for connected displays"
-                        AutomationProperties.Name="Refresh displays">
+                        Command="{Binding RefreshCommand}" ToolTip="Refresh displays and OLED status"
+                        AutomationProperties.Name="Refresh displays and OLED status">
                     <Path Width="13" Height="13" Stretch="Uniform" Stroke="White"
                           StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                           Data="M9.5,3.2 A5,5 0 1 0 10.7,8 M9.5,3.2 L9.5,0.6 M9.5,3.2 L6.9,3.2"/>
                 </Button>
             </Grid>
 
-            <ScrollViewer Grid.Row="2" Margin="20,0,14,0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" PanningMode="VerticalOnly">
+            <Grid Grid.Row="2" Margin="20,0,20,0">
                 <Grid>
                     <Border Padding="20" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
                             CornerRadius="14" Visibility="{Binding NoMonitors, Converter={StaticResource BoolToVis}}">
@@ -367,26 +355,27 @@
                                                         <ColumnDefinition Width="Auto"/>
                                                         <ColumnDefinition Width="Auto"/>
                                                         <ColumnDefinition Width="*"/>
-                                                        <ColumnDefinition Width="Auto"/>
-                                                        <ColumnDefinition Width="Auto"/>
                                                     </Grid.ColumnDefinitions>
                                                     <TextBlock Text="OLED Care" VerticalAlignment="Center" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"/>
                                                     <Border Grid.Column="1" Margin="7,0,0,0" Padding="6,2" VerticalAlignment="Center" Background="#2B2850" CornerRadius="6">
                                                         <TextBlock Text="{Binding OledSupportText}" FontSize="8" FontWeight="SemiBold" Foreground="#AEA6FF"/>
                                                     </Border>
-                                                    <Button Grid.Column="3" Width="28" Height="28" Padding="0" Margin="0,0,6,0" Style="{StaticResource IconButtonStyle}"
-                                                            Command="{Binding RefreshOledStatusCommand}" ToolTip="Refresh OLED Panel Info"
-                                                            AutomationProperties.Name="Refresh OLED status">
-                                                        <Path Width="11" Height="11" Stretch="Uniform" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                                                              StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
-                                                              Data="M9.5,3.2 A5,5 0 1 0 10.7,8 M9.5,3.2 L9.5,0.6 M9.5,3.2 L6.9,3.2"/>
-                                                    </Button>
-                                                    <Button Grid.Column="4" Height="28" Padding="8,0" Style="{StaticResource PrimaryButtonStyle}"
-Command="{Binding RunPixelRefreshCommand}" Content="Panel Protect"
-                                                             AutomationProperties.Name="Panel Protect"/>
                                                 </Grid>
-                                                <TextBlock Grid.Row="1" Margin="0,7,0,0" Text="{Binding OledStatusText}" FontSize="9.5"
-                                                           Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap"/>
+                                                <Grid Grid.Row="1" Margin="0,7,0,0">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Margin="0,0,10,0" VerticalAlignment="Center" Text="{Binding OledStatusText}" FontSize="9.5"
+                                                               Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap"/>
+                                                    <Button Grid.Column="1" Style="{StaticResource PanelProtectIconButtonStyle}"
+                                                            Command="{Binding RunPixelRefreshCommand}"
+                                                            ToolTip="Run Panel Protect"
+                                                            AutomationProperties.Name="Run Panel Protect">
+                                                        <TextBlock FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                                                   FontSize="15" Text="&#xE83D;"/>
+                                                    </Button>
+                                                </Grid>
                                             </Grid>
                                         </Border>
                                     </Grid>
@@ -395,7 +384,7 @@ Command="{Binding RunPixelRefreshCommand}" Content="Panel Protect"
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                 </Grid>
-            </ScrollViewer>
+            </Grid>
 
             <Border Grid.Row="3" Margin="20,10,20,14" Padding="12,10" Background="{StaticResource SurfaceBrush}"
                     BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="14">

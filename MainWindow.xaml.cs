@@ -19,71 +19,53 @@ public partial class MainWindow : Window
     private const int WheelDelta = 120;
     private const uint SwpNoActivate = 0x0010;
     private const uint SwpNoZOrder = 0x0004;
+    private System.Drawing.Point? _anchorScreenPoint;
 
     public MainWindow()
     {
         InitializeComponent();
         DataContext = new MainWindowViewModel();
+        SizeChanged += MainWindow_SizeChanged;
     }
 
-    public void ShowNearTray(System.Drawing.Point trayPoint)
+    public void ShowInBottomRight(System.Drawing.Point screenPoint)
     {
+        _anchorScreenPoint = screenPoint;
         WindowChrome.BeginAnimation(OpacityProperty, null);
         WindowChrome.Opacity = 0;
 
         Show();
         UpdateLayout();
 
-        var edge = PositionNearTray(trayPoint);
-        AnimateFromTray(trayPoint, edge);
+        PositionInBottomRight(screenPoint);
+        AnimateFromBottomRight();
 
         Activate();
         Focus();
     }
 
-    private TrayEdge PositionNearTray(System.Drawing.Point trayPoint)
+    private void MainWindow_SizeChanged(object sender, SizeChangedEventArgs e)
     {
-        var screen = System.Windows.Forms.Screen.FromPoint(trayPoint);
+        if (IsVisible && _anchorScreenPoint is { } screenPoint)
+            PositionInBottomRight(screenPoint);
+    }
+
+    private void PositionInBottomRight(System.Drawing.Point screenPoint)
+    {
+        var screen = System.Windows.Forms.Screen.FromPoint(screenPoint);
         var workArea = screen.WorkingArea;
-        var bounds = screen.Bounds;
-        var edge = FindTaskbarEdge(bounds, workArea, trayPoint);
 
         var windowHandle = new WindowInteropHelper(this).Handle;
-        var scale = GetScaleForPoint(trayPoint, windowHandle);
+        var scale = GetScaleForPoint(screenPoint, windowHandle);
         var width = Math.Max(1, (int)Math.Ceiling(ActualWidth * scale));
         var height = Math.Max(1, (int)Math.Ceiling(ActualHeight * scale));
-        // Leave enough room that the always-on-top popup never intercepts
-        // clicks intended for the taskbar along its edge.
+        // Keep the popup and its shadow clear of the work-area edges.
         const int gap = 20;
 
-        int left;
-        int top;
-
-        switch (edge)
-        {
-            case TrayEdge.Top:
-                left = trayPoint.X - width + 36;
-                top = workArea.Top + gap;
-                break;
-            case TrayEdge.Left:
-                left = workArea.Left + gap;
-                top = trayPoint.Y - height + 36;
-                break;
-            case TrayEdge.Right:
-                left = workArea.Right - width - gap;
-                top = trayPoint.Y - height + 36;
-                break;
-            default:
-                left = trayPoint.X - width + 36;
-                top = workArea.Bottom - height - gap;
-                break;
-        }
-
-        left = Math.Clamp(left, workArea.Left, Math.Max(workArea.Left, workArea.Right - width));
-        top = Math.Clamp(top, workArea.Top, Math.Max(workArea.Top, workArea.Bottom - height));
+        int left = Math.Max(workArea.Left, workArea.Right - width - gap);
+        int top = Math.Max(workArea.Top, workArea.Bottom - height - gap);
 
         SetWindowPos(windowHandle, IntPtr.Zero, left, top, width, height, SwpNoActivate | SwpNoZOrder);
-        return edge;
     }
 
     private static double GetScaleForPoint(System.Drawing.Point point, IntPtr windowHandle)
@@ -96,21 +78,12 @@ public partial class MainWindow : Window
         return GetDpiForWindow(windowHandle) / 96.0;
     }
 
-    private void AnimateFromTray(System.Drawing.Point trayPoint, TrayEdge edge)
+    private void AnimateFromBottomRight()
     {
-        var trayInWindow = PointFromScreen(new System.Windows.Point(trayPoint.X, trayPoint.Y));
-        WindowChrome.RenderTransformOrigin = new System.Windows.Point(
-            Math.Clamp(trayInWindow.X / Math.Max(1, ActualWidth), 0, 1),
-            Math.Clamp(trayInWindow.Y / Math.Max(1, ActualHeight), 0, 1));
+        WindowChrome.RenderTransformOrigin = new System.Windows.Point(1, 1);
 
         var scale = new ScaleTransform(0.92, 0.92);
-        var translate = edge switch
-        {
-            TrayEdge.Top => new TranslateTransform(0, -18),
-            TrayEdge.Left => new TranslateTransform(-18, 0),
-            TrayEdge.Right => new TranslateTransform(18, 0),
-            _ => new TranslateTransform(0, 18)
-        };
+        var translate = new TranslateTransform(0, 18);
         var transforms = new TransformGroup();
         transforms.Children.Add(scale);
         transforms.Children.Add(translate);
@@ -128,40 +101,6 @@ public partial class MainWindow : Window
             new DoubleAnimation(translate.X, 0, duration) { EasingFunction = easing });
         translate.BeginAnimation(TranslateTransform.YProperty,
             new DoubleAnimation(translate.Y, 0, duration) { EasingFunction = easing });
-    }
-
-    private static TrayEdge FindTaskbarEdge(
-        System.Drawing.Rectangle bounds,
-        System.Drawing.Rectangle workArea,
-        System.Drawing.Point trayPoint)
-    {
-        var insets = new[]
-        {
-            (Edge: TrayEdge.Left, Size: workArea.Left - bounds.Left),
-            (Edge: TrayEdge.Top, Size: workArea.Top - bounds.Top),
-            (Edge: TrayEdge.Right, Size: bounds.Right - workArea.Right),
-            (Edge: TrayEdge.Bottom, Size: bounds.Bottom - workArea.Bottom)
-        };
-        var taskbar = insets.OrderByDescending(item => item.Size).First();
-        if (taskbar.Size > 0)
-            return taskbar.Edge;
-
-        var distances = new[]
-        {
-            (Edge: TrayEdge.Left, Distance: Math.Abs(trayPoint.X - bounds.Left)),
-            (Edge: TrayEdge.Top, Distance: Math.Abs(trayPoint.Y - bounds.Top)),
-            (Edge: TrayEdge.Right, Distance: Math.Abs(bounds.Right - trayPoint.X)),
-            (Edge: TrayEdge.Bottom, Distance: Math.Abs(bounds.Bottom - trayPoint.Y))
-        };
-        return distances.OrderBy(item => item.Distance).First().Edge;
-    }
-
-    private enum TrayEdge
-    {
-        Left,
-        Top,
-        Right,
-        Bottom
     }
 
     [DllImport("user32.dll")]

@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text.Json;
+using DisplayBrightness.Models;
 
 namespace DisplayBrightness.Services;
 
@@ -16,6 +17,7 @@ public class StorageService : IStorageService
     };
 
     private readonly string _settingsPath;
+    private readonly string _oledHistoryPath;
     private readonly object _saveLock = new();
 
     public StorageService()
@@ -23,6 +25,7 @@ public class StorageService : IStorageService
         var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
         var appFolder = Path.Combine(appData, AppName);
         _settingsPath = Path.Combine(appFolder, "settings.json");
+        _oledHistoryPath = GetOledHistoryPath(AppContext.BaseDirectory);
 
         try
         {
@@ -42,6 +45,9 @@ public class StorageService : IStorageService
     internal StorageService(string settingsPath)
     {
         _settingsPath = settingsPath;
+        _oledHistoryPath = Path.Combine(
+            Path.GetDirectoryName(settingsPath) ?? string.Empty,
+            "oled-care-history.json");
         try
         {
             string? directory = Path.GetDirectoryName(settingsPath);
@@ -83,38 +89,69 @@ public class StorageService : IStorageService
 
     public void SaveSettings(Dictionary<string, int> settings)
     {
-        lock (_saveLock)
+        SaveJson(_settingsPath, settings);
+    }
+
+    public Dictionary<string, OledPanelProtectHistory> LoadOledPanelProtectHistory()
+    {
+        var normalized = CreateOledHistoryDictionary();
+        if (!File.Exists(_oledHistoryPath))
+            return normalized;
+
+        try
         {
-            string? tempPath = null;
-            try
+            string json = File.ReadAllText(_oledHistoryPath);
+            var history = JsonSerializer.Deserialize<
+                Dictionary<string, OledPanelProtectHistory>>(json, JsonOptions);
+            if (history == null)
+                return normalized;
+
+            foreach (var (devicePath, entry) in history)
             {
-                var json = JsonSerializer.Serialize(settings, JsonOptions);
-                tempPath = Path.Combine(
-                    Path.GetDirectoryName(_settingsPath)!,
-                    $"settings_{Guid.NewGuid():N}.tmp");
-                File.WriteAllText(tempPath, json);
-                if (File.Exists(_settingsPath))
-                    File.Replace(tempPath, _settingsPath, null);
-                else
-                    File.Move(tempPath, _settingsPath);
-            }
-            catch
-            {
-            }
-            finally
-            {
-                if (tempPath != null && File.Exists(tempPath))
+                if (string.IsNullOrWhiteSpace(devicePath) ||
+                    entry == null ||
+                    entry.LastStartedAtUtc == default)
+                    continue;
+
+                int? usageHours = entry.TotalUsageHoursAtStart is >= 0
+                    ? entry.TotalUsageHoursAtStart
+                    : null;
+                normalized[devicePath] = entry with
                 {
-                    try
-                    {
-                        File.Delete(tempPath);
-                    }
-                    catch
-                    {
-                    }
-                }
+                    LastStartedAtUtc = entry.LastStartedAtUtc.ToUniversalTime(),
+                    TotalUsageHoursAtStart = usageHours
+                };
             }
+
+            return normalized;
         }
+        catch
+        {
+            return CreateOledHistoryDictionary();
+        }
+    }
+
+    public void SaveOledPanelProtectHistory(
+        Dictionary<string, OledPanelProtectHistory> history)
+    {
+        var normalized = CreateOledHistoryDictionary();
+        foreach (var (devicePath, entry) in history)
+        {
+            if (string.IsNullOrWhiteSpace(devicePath) ||
+                entry == null ||
+                entry.LastStartedAtUtc == default)
+                continue;
+
+            normalized[devicePath] = entry with
+            {
+                LastStartedAtUtc = entry.LastStartedAtUtc.ToUniversalTime(),
+                TotalUsageHoursAtStart = entry.TotalUsageHoursAtStart is >= 0
+                    ? entry.TotalUsageHoursAtStart
+                    : null
+            };
+        }
+
+        SaveJson(_oledHistoryPath, normalized);
     }
 
     public bool GetStartOnStartup()
@@ -185,6 +222,49 @@ public class StorageService : IStorageService
     internal static string FormatStartupCommand(string executablePath) =>
         $"\"{executablePath.Trim('\"')}\" --startup";
 
+    internal static string GetOledHistoryPath(string executableDirectory) =>
+        Path.Combine(executableDirectory, "oled-care-history.json");
+
+    private void SaveJson<T>(string destinationPath, T value)
+    {
+        lock (_saveLock)
+        {
+            string? tempPath = null;
+            try
+            {
+                string json = JsonSerializer.Serialize(value, JsonOptions);
+                tempPath = Path.Combine(
+                    Path.GetDirectoryName(destinationPath)!,
+                    $"{Path.GetFileNameWithoutExtension(destinationPath)}_{Guid.NewGuid():N}.tmp");
+                File.WriteAllText(tempPath, json);
+                if (File.Exists(destinationPath))
+                    File.Replace(tempPath, destinationPath, null);
+                else
+                    File.Move(tempPath, destinationPath);
+            }
+            catch
+            {
+            }
+            finally
+            {
+                if (tempPath != null && File.Exists(tempPath))
+                {
+                    try
+                    {
+                        File.Delete(tempPath);
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
+        }
+    }
+
     private static Dictionary<string, int> CreateSettingsDictionary() =>
+        new(StringComparer.OrdinalIgnoreCase);
+
+    private static Dictionary<string, OledPanelProtectHistory>
+        CreateOledHistoryDictionary() =>
         new(StringComparer.OrdinalIgnoreCase);
 }

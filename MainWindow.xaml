@@ -366,7 +366,7 @@
                                                         <ColumnDefinition Width="*"/>
                                                         <ColumnDefinition Width="Auto"/>
                                                     </Grid.ColumnDefinitions>
-                                                    <TextBlock Margin="0,0,10,0" VerticalAlignment="Center" Text="{Binding OledStatusText}" FontSize="9.5"
+                                                    <TextBlock Margin="0,0,10,0" VerticalAlignment="Center" Text="{Binding OledSummaryText}" FontSize="9.5"
                                                                Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap"/>
                                                     <Button Grid.Column="1" Style="{StaticResource PanelProtectIconButtonStyle}"
                                                             Command="{Binding RunPixelRefreshCommand}"

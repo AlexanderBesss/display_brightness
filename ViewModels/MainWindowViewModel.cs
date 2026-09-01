@@ -14,6 +14,8 @@ public class MainWindowViewModel : ViewModelBase
     private readonly IUserDialogService _dialogService;
     private Dictionary<string, int> _savedSettings =
         new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, OledPanelProtectHistory> _oledPanelProtectHistory =
+        new(StringComparer.OrdinalIgnoreCase);
 
     private bool _startOnStartup;
     public bool StartOnStartup
@@ -78,6 +80,8 @@ public class MainWindowViewModel : ViewModelBase
             var monitors = _displayService.GetExternalMonitors();
 
             _savedSettings = _storageService.LoadSettings();
+            _oledPanelProtectHistory =
+                _storageService.LoadOledPanelProtectHistory();
             ClearMonitors();
 
             string? primaryDisplayName = System.Windows.Forms.Screen.PrimaryScreen?.DeviceName;
@@ -106,7 +110,13 @@ public class MainWindowViewModel : ViewModelBase
                     initialBrightness,
                     brightness => CommitBrightness(monitor, brightness),
                     _oledCareService,
-                    _dialogService);
+                    _dialogService,
+                    _oledPanelProtectHistory.TryGetValue(
+                        monitor.DevicePath,
+                        out OledPanelProtectHistory? history)
+                            ? history
+                            : null,
+                    entry => SaveOledPanelProtectHistory(monitor, entry));
 
                 vm.IsPrimary = string.Equals(
                     monitor.DisplayName,
@@ -199,5 +209,16 @@ public class MainWindowViewModel : ViewModelBase
         {
             return false;
         }
+    }
+
+    private void SaveOledPanelProtectHistory(
+        MonitorInfo monitor,
+        OledPanelProtectHistory history)
+    {
+        if (string.IsNullOrWhiteSpace(monitor.DevicePath))
+            return;
+
+        _oledPanelProtectHistory[monitor.DevicePath] = history;
+        _storageService.SaveOledPanelProtectHistory(_oledPanelProtectHistory);
     }
 }

@@ -2,6 +2,7 @@ using DisplayBrightness.Models;
 using DisplayBrightness.Services;
 using DisplayBrightness.Utilities;
 using System.Windows.Input;
+using System.Windows.Threading;
 
 namespace DisplayBrightness.ViewModels;
 
@@ -11,7 +12,11 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
     private readonly Func<int, bool> _commitBrightness;
     private readonly IOledCareService _oledCareService;
     private readonly IUserDialogService _dialogService;
+    private readonly Action<OledPanelProtectHistory>? _savePanelProtectHistory;
+    private readonly TimeProvider _timeProvider;
+    private readonly DispatcherTimer? _panelProtectHistoryTimer;
     private readonly CancellationTokenSource _lifetimeCancellation = new();
+    private OledPanelProtectHistory? _panelProtectHistory;
     private bool _isDisposed;
 
     internal string DisplayName { get; }
@@ -56,8 +61,28 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
     public string OledStatusText
     {
         get => _oledStatusText;
-        private set => SetProperty(ref _oledStatusText, value);
+        private set
+        {
+            if (SetProperty(ref _oledStatusText, value))
+                OnPropertyChanged(nameof(OledSummaryText));
+        }
     }
+
+    private string _lastPanelProtectText = "Last panel protect: not tracked yet";
+    public string LastPanelProtectText
+    {
+        get => _lastPanelProtectText;
+        private set
+        {
+            if (SetProperty(ref _lastPanelProtectText, value))
+                OnPropertyChanged(nameof(OledSummaryText));
+        }
+    }
+
+    public string OledSummaryText => $"{OledStatusText} · {LastPanelProtectText}";
+
+    internal bool IsPanelProtectHistoryTimerRunning =>
+        _panelProtectHistoryTimer?.IsEnabled == true;
 
     public ICommand RunPixelRefreshCommand { get; }
 
@@ -81,7 +106,10 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
         int initialBrightness,
         Func<int, bool> commitBrightness,
         IOledCareService oledCareService,
-        IUserDialogService dialogService)
+        IUserDialogService dialogService,
+        OledPanelProtectHistory? panelProtectHistory = null,
+        Action<OledPanelProtectHistory>? savePanelProtectHistory = null,
+        TimeProvider? timeProvider = null)
     {
         _monitor = monitor;
         DisplayName = monitor.DisplayName;
@@ -92,6 +120,9 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
         _commitBrightness = commitBrightness;
         _oledCareService = oledCareService;
         _dialogService = dialogService;
+        _panelProtectHistory = panelProtectHistory;
+        _savePanelProtectHistory = savePanelProtectHistory;
+        _timeProvider = timeProvider ?? TimeProvider.System;
         OledSupportLevel = _oledCareService.GetSupportLevel(monitor);
         RunPixelRefreshCommand = new AsyncRelayCommand(
             RunPixelRefreshAsync,
@@ -99,6 +130,14 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
 
         if (ShowOledCare)
         {
+            UpdateLastPanelProtectText();
+            _panelProtectHistoryTimer = new DispatcherTimer(
+                TimeSpan.FromMinutes(1),
+                DispatcherPriority.Background,
+                PanelProtectHistoryTimer_Tick,
+                Dispatcher.CurrentDispatcher);
+            _panelProtectHistoryTimer.Start();
+
             AsyncHelper.FireAndForget(
                 () => RefreshOledStatusAsync(_lifetimeCancellation.Token),
                 "OLED initial status");
@@ -170,7 +209,30 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
         try
         {
             PixelRefreshResult result = await _oledCareService.StartPixelRefreshAsync(_monitor);
-            OledStatusText = result.Message;
+            if (result.Started)
+            {
+                _panelProtectHistory = new OledPanelProtectHistory(
+                    _timeProvider.GetUtcNow(),
+                    _oledStatus?.PanelInfo?.TotalUsageHours);
+                UpdateLastPanelProtectText();
+
+                try
+                {
+                    _savePanelProtectHistory?.Invoke(_panelProtectHistory);
+                }
+                catch
+                {
+                    // History is optional and must not turn a successfully sent
+                    // panel-protect command into an application error.
+                }
+
+                if (_oledStatus?.PanelInfo?.TotalUsageHours == null)
+                    OledStatusText = result.Message;
+            }
+            else
+            {
+                OledStatusText = result.Message;
+            }
         }
         catch (Exception ex)
         {
@@ -209,12 +271,50 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
         CommandManager.InvalidateRequerySuggested();
     }
 
+    internal static string FormatLastPanelProtectText(
+        OledPanelProtectHistory? history,
+        DateTimeOffset now)
+    {
+        if (history == null)
+            return "Last panel protect: not tracked yet";
+
+        TimeSpan elapsed = now - history.LastStartedAtUtc;
+        if (elapsed < TimeSpan.FromMinutes(1))
+            return "Last panel protect started: just now";
+
+        long totalMinutes = (long)Math.Floor(elapsed.TotalMinutes);
+        if (totalMinutes < 60)
+            return $"Last panel protect started: {totalMinutes}m ago";
+
+        long hours = totalMinutes / 60;
+        long minutes = totalMinutes % 60;
+        return $"Last panel protect started: {hours}h {minutes}m ago";
+    }
+
+    private void UpdateLastPanelProtectText()
+    {
+        LastPanelProtectText = FormatLastPanelProtectText(
+            _panelProtectHistory,
+            _timeProvider.GetUtcNow());
+    }
+
+    private void PanelProtectHistoryTimer_Tick(object? sender, EventArgs e)
+    {
+        if (!_isDisposed)
+            UpdateLastPanelProtectText();
+    }
+
     public void Dispose()
     {
         if (_isDisposed)
             return;
 
         _isDisposed = true;
+        if (_panelProtectHistoryTimer != null)
+        {
+            _panelProtectHistoryTimer.Stop();
+            _panelProtectHistoryTimer.Tick -= PanelProtectHistoryTimer_Tick;
+        }
         _lifetimeCancellation.Cancel();
         _lifetimeCancellation.Dispose();
         GC.SuppressFinalize(this);

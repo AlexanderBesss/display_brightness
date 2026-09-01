@@ -33,3 +33,7 @@ public sealed record OledCareStatus(
 }
 
 public sealed record PixelRefreshResult(bool Started, string Message);
+
+public sealed record OledPanelProtectHistory(
+    DateTimeOffset LastStartedAtUtc,
+    int? TotalUsageHoursAtStart);

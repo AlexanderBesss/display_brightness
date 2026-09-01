@@ -15,7 +15,8 @@ the .NET 8 Desktop Runtime (x64).
 - Left-click tray icon to show/hide the window
 - Scroll over the tray icon to adjust the primary display by 2% per wheel notch
 - Persistent brightness settings per monitor
-- Standalone MSI OLED Care status and user-initiated Panel Protect support
+- Standalone MSI OLED Care status, user-initiated Panel Protect support, and
+  app-tracked time since the last successful Panel Protect launch
 - Optional startup with Windows
 
 ## Requirements

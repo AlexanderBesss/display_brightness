@@ -127,14 +127,21 @@ internal NVRAM values rendered by the OSD only. The only related values the
 app can read are total usage hours (VCP `0xC0`) and the OLED protection
 settings listed above.
 
+The app therefore keeps a separate, per-monitor history only for Panel Protect
+commands that it successfully sends. It records the UTC dispatch time and the
+current VCP `0xC0` usage-hours value when available. The displayed elapsed time
+is wall-clock time since dispatch; it is not the monitor's internal last-run
+value and cannot detect refreshes started from the OSD or other software. This
+history is stored in `oled-care-history.json` next to the application executable.
+
 ## 6. Safety constraints
 
 - Only the allow-listed Panel Protect command (`00;10` = `001`) is sent; no other
   write is issued by the app.
 - Avoid dangerous registers `0x960` and `0x40A`.
 - User confirmation dialog before each refresh.
-- No scheduling, no inferred refresh history; unsupported monitors get no HID
-  traffic at all.
+- No scheduling or inferred monitor history; only successful commands launched
+  by this app are recorded. Unsupported monitors get no HID traffic at all.
 
 ## 7. Implementation map
 

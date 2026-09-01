@@ -130,6 +130,7 @@ public class MonitorEnumerator
                     continue;
 
                 map[subName] = (subString, subId, gpuName);
+                map.TryAdd(gpuName, (subString, subId, gpuName));
             }
         }
 
@@ -337,6 +338,9 @@ public class MonitorEnumerator
 
                 var monitor = MonitorInfoParser.CreateMonitorFromEnumDevices(
                     subString, subId, deviceId, deviceString);
+                monitor.DisplayName = deviceName;
+                monitor.RefreshRateHz = DisplayInterop.GetDeviceRefreshRateHz(
+                    deviceName);
                 monitors.Add(monitor);
             }
         }

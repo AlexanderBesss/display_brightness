@@ -170,6 +170,12 @@ public partial class MainWindow : Window
         }
     }
 
+    private void Slider_KeyUp(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (sender is Slider slider && slider.DataContext is MonitorSliderViewModel vm)
+            vm.CommitBrightness();
+    }
+
     private void MonitorCard_MouseWheel(object sender, MouseWheelEventArgs e)
     {
         if (sender is not Border monitorCard ||

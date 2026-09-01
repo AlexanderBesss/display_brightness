@@ -2,7 +2,7 @@ using DisplayBrightness.Models;
 
 namespace DisplayBrightness.Services;
 
-public class DisplayService
+public class DisplayService : IDisplayService
 {
     private readonly MonitorEnumerator _enumerator = new();
     private readonly IBrightnessController _brightnessController = new BrightnessController();

@@ -20,8 +20,10 @@ internal sealed class NativeTrayIcon : NativeWindow, IDisposable
     private const uint NotifyIconVersion4 = 4;
     private const int WmApp = 0x8000;
     private const int WmInput = 0x00FF;
+    private const int WmContextMenu = 0x007B;
     private const int WmLeftButtonUp = 0x0202;
     private const int WmRightButtonUp = 0x0205;
+    private const int NinKeySelect = 0x0401;
     private const int TrayCallbackMessage = WmApp + 1;
     private const int MaximumTooltipLength = 127;
     private const uint RidInput = 0x10000003;
@@ -44,7 +46,7 @@ internal sealed class NativeTrayIcon : NativeWindow, IDisposable
     private bool _isWheelEnabled;
     private bool _isDisposed;
 
-    public event Action? LeftClick;
+    public event Action<Point>? LeftClick;
     public event Action? RightClick;
     public event Action<int>? MouseWheel;
 
@@ -127,9 +129,9 @@ internal sealed class NativeTrayIcon : NativeWindow, IDisposable
         if (message.Msg == TrayCallbackMessage)
         {
             int notification = unchecked((ushort)(long)message.LParam);
-            if (notification == WmLeftButtonUp)
-                LeftClick?.Invoke();
-            else if (notification == WmRightButtonUp)
+            if (notification is WmLeftButtonUp or NinKeySelect)
+                LeftClick?.Invoke(GetAnchorPoint(message.WParam));
+            else if (notification is WmRightButtonUp or WmContextMenu)
                 RightClick?.Invoke();
         }
         else if (message.Msg == WmInput)
@@ -149,6 +151,14 @@ internal sealed class NativeTrayIcon : NativeWindow, IDisposable
         }
 
         base.WndProc(ref message);
+    }
+
+    private static Point GetAnchorPoint(IntPtr messageParameter)
+    {
+        long packedCoordinates = messageParameter.ToInt64();
+        int x = unchecked((short)packedCoordinates);
+        int y = unchecked((short)(packedCoordinates >> 16));
+        return new Point(x, y);
     }
 
     public void Dispose()

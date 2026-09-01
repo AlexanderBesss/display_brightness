@@ -3,7 +3,7 @@ using System.Text.Json;
 
 namespace DisplayBrightness.Services;
 
-public class StorageService
+public class StorageService : IStorageService
 {
     private const string AppName = "Brightness";
     private const string LegacyAppName = "DisplayBrightness";
@@ -22,31 +22,62 @@ public class StorageService
     {
         var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
         var appFolder = Path.Combine(appData, AppName);
-        Directory.CreateDirectory(appFolder);
         _settingsPath = Path.Combine(appFolder, "settings.json");
 
-        var legacySettingsPath = Path.Combine(appData, LegacyAppName, "settings.json");
-        if (!File.Exists(_settingsPath) && File.Exists(legacySettingsPath))
+        try
         {
-            File.Copy(legacySettingsPath, _settingsPath);
+            Directory.CreateDirectory(appFolder);
+
+            var legacySettingsPath = Path.Combine(appData, LegacyAppName, "settings.json");
+            if (!File.Exists(_settingsPath) && File.Exists(legacySettingsPath))
+                File.Copy(legacySettingsPath, _settingsPath);
+        }
+        catch
+        {
+            // Settings are optional. A read-only or unavailable roaming profile
+            // must not prevent brightness control from starting.
+        }
+    }
+
+    internal StorageService(string settingsPath)
+    {
+        _settingsPath = settingsPath;
+        try
+        {
+            string? directory = Path.GetDirectoryName(settingsPath);
+            if (!string.IsNullOrEmpty(directory))
+                Directory.CreateDirectory(directory);
+        }
+        catch
+        {
         }
     }
 
     public Dictionary<string, int> LoadSettings()
     {
         if (!File.Exists(_settingsPath))
-            return new Dictionary<string, int>();
+            return CreateSettingsDictionary();
 
         try
         {
             var json = File.ReadAllText(_settingsPath);
             var settings = JsonSerializer.Deserialize<Dictionary<string, int>>(
                 json, JsonOptions);
-            return settings ?? new Dictionary<string, int>();
+            var normalized = CreateSettingsDictionary();
+            if (settings != null)
+            {
+                foreach (var (devicePath, brightness) in settings)
+                {
+                    if (!string.IsNullOrWhiteSpace(devicePath))
+                        normalized[devicePath] = Math.Clamp(brightness, 0, 100);
+                }
+            }
+
+            return normalized;
         }
         catch
         {
-            return new Dictionary<string, int>();
+            return CreateSettingsDictionary();
         }
     }
 
@@ -92,7 +123,20 @@ public class StorageService
         {
             using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
                 StartupRegistryPath);
-            return key?.GetValue(AppName) != null || key?.GetValue(LegacyAppName) != null;
+            object? currentValue = key?.GetValue(AppName);
+            string? currentCommand = Convert.ToString(currentValue);
+            bool hasLegacyCommand = key?.GetValue(LegacyAppName) != null;
+            bool isEnabled = currentValue != null || hasLegacyCommand;
+
+            if (isEnabled && !string.Equals(
+                    currentCommand,
+                    FormatStartupCommand(GetExecutablePath()),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                SetStartOnStartup(enabled: true);
+            }
+
+            return isEnabled;
         }
         catch
         {
@@ -100,7 +144,7 @@ public class StorageService
         }
     }
 
-    public void SetStartOnStartup(bool enabled)
+    public bool SetStartOnStartup(bool enabled)
     {
         try
         {
@@ -111,7 +155,7 @@ public class StorageService
             {
                 key.SetValue(
                     AppName,
-                    GetExecutablePath(),
+                    FormatStartupCommand(GetExecutablePath()),
                     Microsoft.Win32.RegistryValueKind.String);
                 key.DeleteValue(LegacyAppName, throwOnMissingValue: false);
             }
@@ -120,9 +164,12 @@ public class StorageService
                 key.DeleteValue(AppName, throwOnMissingValue: false);
                 key.DeleteValue(LegacyAppName, throwOnMissingValue: false);
             }
+
+            return true;
         }
         catch
         {
+            return false;
         }
     }
 
@@ -134,4 +181,10 @@ public class StorageService
 
         return System.Windows.Forms.Application.ExecutablePath;
     }
+
+    internal static string FormatStartupCommand(string executablePath) =>
+        $"\"{executablePath.Trim('\"')}\" --startup";
+
+    private static Dictionary<string, int> CreateSettingsDictionary() =>
+        new(StringComparer.OrdinalIgnoreCase);
 }

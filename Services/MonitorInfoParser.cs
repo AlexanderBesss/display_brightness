@@ -123,7 +123,7 @@ public static class MonitorInfoParser
 
         return new MonitorInfo
         {
-            DevicePath = monitorDeviceName,
+            DevicePath = FirstNonEmpty(deviceId, monitorDeviceName),
             DisplayName = monitorDeviceName,
             FriendlyName = friendlyName,
             ModelName = FirstNonEmpty(ExtractModelFromDeviceId(deviceId), hardwareId),

@@ -29,7 +29,8 @@ public sealed class MsiHidCapabilitiesDiagnosticTests
             Console.WriteLine($"Caps success: {success}; {capabilities}");
         }
 
-        Assert.NotEmpty(paths);
+        // This is a hardware diagnostic, not a requirement for running the
+        // portable unit-test suite (including on CI without an MSI monitor).
     }
 
     [Fact]
@@ -55,7 +56,7 @@ public sealed class MsiHidCapabilitiesDiagnosticTests
             Console.WriteLine($"  Caps: {success}; {capabilities}");
         }
 
-        Assert.NotEmpty(paths);
+        // An empty result is expected on machines without MSI USB hardware.
     }
 
     [Fact]

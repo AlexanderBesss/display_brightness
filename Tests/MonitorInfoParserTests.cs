@@ -25,4 +25,17 @@ public sealed class MonitorInfoParserTests
     {
         Assert.Equal(expected, MonitorInfoParser.FormatRefreshRate(rate));
     }
+
+    [Fact]
+    public void EnumMonitor_UsesStableDeviceIdForSavedSettings()
+    {
+        const string deviceId = @"MONITOR\MSI3CD7\{instance}";
+
+        var monitor = MonitorInfoParser.CreateMonitorFromEnumMonitors(
+            @"\\.\DISPLAY2",
+            ("MSI MPG 271QRX", deviceId, @"\\.\DISPLAY2"));
+
+        Assert.Equal(deviceId, monitor.DevicePath);
+        Assert.Equal(@"\\.\DISPLAY2", monitor.DisplayName);
+    }
 }

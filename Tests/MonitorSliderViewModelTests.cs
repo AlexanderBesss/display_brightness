@@ -13,7 +13,7 @@ public sealed class MonitorSliderViewModelTests
         var viewModel = new MonitorSliderViewModel(
             CreateMonitor(),
             50,
-            _ => { },
+            _ => true,
             oledService,
             new RejectingDialogService());
         await WaitUntilAsync(() => viewModel.CanRunPixelRefresh);
@@ -34,7 +34,7 @@ public sealed class MonitorSliderViewModelTests
         var viewModel = new MonitorSliderViewModel(
             CreateMonitor(rate),
             50,
-            _ => { },
+            _ => true,
             new FakeOledCareService(),
             new RejectingDialogService());
 
@@ -49,7 +49,11 @@ public sealed class MonitorSliderViewModelTests
         var viewModel = new MonitorSliderViewModel(
             CreateMonitor(),
             50,
-            value => committedBrightness = value,
+            value =>
+            {
+                committedBrightness = value;
+                return true;
+            },
             new FakeOledCareService(),
             new RejectingDialogService());
 
@@ -101,13 +105,67 @@ public sealed class MonitorSliderViewModelTests
         var viewModel = new MonitorSliderViewModel(
             monitor,
             50,
-            _ => { },
+            _ => true,
             oledService,
             new RejectingDialogService());
 
         await WaitUntilAsync(() => viewModel.RefreshRateText == "240 Hz");
 
         Assert.Equal(240.0, monitor.RefreshRateHz);
+    }
+
+    [Fact]
+    public void FailedCommit_RestoresLastAppliedBrightness()
+    {
+        var viewModel = new MonitorSliderViewModel(
+            CreateMonitor(),
+            50,
+            _ => false,
+            new FakeOledCareService(),
+            new RejectingDialogService());
+
+        viewModel.BrightnessValue = 75;
+        viewModel.CommitBrightness();
+
+        Assert.Equal(50, viewModel.BrightnessValue);
+        Assert.False(viewModel.AdjustBrightness(2));
+        Assert.Equal(50, viewModel.BrightnessValue);
+    }
+
+    [Theory]
+    [InlineData(-10, 0)]
+    [InlineData(120, 100)]
+    public void BrightnessValue_ClampsValuesOutsideMonitorRange(
+        double requested,
+        double expected)
+    {
+        var viewModel = new MonitorSliderViewModel(
+            CreateMonitor(),
+            50,
+            _ => true,
+            new FakeOledCareService(),
+            new RejectingDialogService());
+
+        viewModel.BrightnessValue = requested;
+
+        Assert.Equal(expected, viewModel.BrightnessValue);
+    }
+
+    [Fact]
+    public async Task Dispose_CancelsInFlightInitialStatusRead()
+    {
+        var oledService = new CancellableOledCareService();
+        var viewModel = new MonitorSliderViewModel(
+            CreateMonitor(),
+            50,
+            _ => true,
+            oledService,
+            new RejectingDialogService());
+
+        await oledService.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        viewModel.Dispose();
+
+        await oledService.Cancelled.Task.WaitAsync(TimeSpan.FromSeconds(2));
     }
 
     private sealed class FakeOledCareService : IOledCareService
@@ -134,5 +192,39 @@ public sealed class MonitorSliderViewModelTests
             StartCount++;
             return Task.FromResult(new PixelRefreshResult(true, "started"));
         }
+    }
+
+    private sealed class CancellableOledCareService : IOledCareService
+    {
+        public TaskCompletionSource Started { get; } = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Cancelled { get; } = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public OledSupportLevel GetSupportLevel(MonitorInfo monitor) =>
+            OledSupportLevel.Verified;
+
+        public async Task<OledCareStatus> GetStatusAsync(
+            MonitorInfo monitor,
+            CancellationToken cancellationToken = default)
+        {
+            Started.TrySetResult();
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                Cancelled.TrySetResult();
+                throw;
+            }
+
+            throw new InvalidOperationException("Unreachable.");
+        }
+
+        public Task<PixelRefreshResult> StartPixelRefreshAsync(
+            MonitorInfo monitor,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("Not used by this test.");
     }
 }

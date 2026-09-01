@@ -8,11 +8,12 @@ namespace DisplayBrightness.ViewModels;
 
 public class MainWindowViewModel : ViewModelBase
 {
-    private readonly DisplayService _displayService;
-    private readonly StorageService _storageService;
+    private readonly IDisplayService _displayService;
+    private readonly IStorageService _storageService;
     private readonly IOledCareService _oledCareService;
     private readonly IUserDialogService _dialogService;
-    private Dictionary<string, int> _savedSettings = new();
+    private Dictionary<string, int> _savedSettings =
+        new(StringComparer.OrdinalIgnoreCase);
 
     private bool _startOnStartup;
     public bool StartOnStartup
@@ -20,8 +21,13 @@ public class MainWindowViewModel : ViewModelBase
         get => _startOnStartup;
         set
         {
-            if (SetProperty(ref _startOnStartup, value))
-                _storageService.SetStartOnStartup(value);
+            if (_startOnStartup == value)
+                return;
+
+            if (_storageService.SetStartOnStartup(value))
+                SetProperty(ref _startOnStartup, value);
+            else
+                OnPropertyChanged();
         }
     }
 
@@ -50,8 +56,8 @@ public class MainWindowViewModel : ViewModelBase
 
     public ICommand RefreshCommand { get; }
     public MainWindowViewModel(
-        DisplayService? displayService = null,
-        StorageService? storageService = null,
+        IDisplayService? displayService = null,
+        IStorageService? storageService = null,
         IOledCareService? oledCareService = null,
         IUserDialogService? dialogService = null)
     {
@@ -80,7 +86,17 @@ public class MainWindowViewModel : ViewModelBase
 
             foreach (var monitor in monitors)
             {
-                var initialBrightness = _displayService.GetBrightness(monitor)
+                int? currentBrightness = null;
+                try
+                {
+                    currentBrightness = _displayService.GetBrightness(monitor);
+                }
+                catch
+                {
+                    // A single unavailable display must not hide the other displays.
+                }
+
+                var initialBrightness = currentBrightness
                     ?? (_savedSettings.TryGetValue(monitor.DevicePath, out var saved)
                         ? saved
                         : 50);
@@ -119,7 +135,10 @@ public class MainWindowViewModel : ViewModelBase
     private void ClearMonitors()
     {
         foreach (var monitor in Monitors)
+        {
             monitor.PropertyChanged -= Monitor_PropertyChanged;
+            monitor.Dispose();
+        }
 
         Monitors.Clear();
     }
@@ -165,10 +184,20 @@ public class MainWindowViewModel : ViewModelBase
         }
     }
 
-    private void CommitBrightness(MonitorInfo monitor, int brightness)
+    private bool CommitBrightness(MonitorInfo monitor, int brightness)
     {
-        _savedSettings[monitor.DevicePath] = brightness;
-        _storageService.SaveSettings(_savedSettings);
-        _displayService.SetBrightness(monitor, brightness);
+        try
+        {
+            if (!_displayService.SetBrightness(monitor, brightness))
+                return false;
+
+            _savedSettings[monitor.DevicePath] = brightness;
+            _storageService.SaveSettings(_savedSettings);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 }

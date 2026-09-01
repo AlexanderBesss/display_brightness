@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -12,6 +13,7 @@ namespace DisplayBrightness;
 public partial class App : System.Windows.Application
 {
     private const int BrightnessStep = 2;
+    private const string StartupArgument = "--startup";
 
     private NativeTrayIcon? _trayIcon;
     private System.Windows.Controls.ContextMenu? _trayMenu;
@@ -24,7 +26,11 @@ public partial class App : System.Windows.Application
     {
         try
         {
-            StartApp();
+            bool startHidden = e.Args.Any(argument => string.Equals(
+                argument,
+                StartupArgument,
+                StringComparison.OrdinalIgnoreCase));
+            StartApp(startHidden);
         }
         catch (Exception ex)
         {
@@ -34,9 +40,10 @@ public partial class App : System.Windows.Application
         }
     }
 
-    private void StartApp()
+    private void StartApp(bool startHidden)
     {
         _mainWindow = new MainWindow();
+        MainWindow = _mainWindow;
 
         var viewModel = (MainWindowViewModel)_mainWindow.DataContext;
         _trayIcon = new NativeTrayIcon(
@@ -62,16 +69,27 @@ public partial class App : System.Windows.Application
 
         _mainWindow.Deactivated += (_, _) =>
         {
-            if (_trayIcon?.IsPointOverIcon(System.Windows.Forms.Cursor.Position) != true)
-                _mainWindow.Hide();
+            // Clicking the tray icon can briefly return activation to Explorer
+            // after the popup is shown. Preserve the original synchronous guard
+            // so that transient deactivation cannot immediately hide it again.
+            if (_trayIcon?.IsPointOverIcon(
+                    System.Windows.Forms.Cursor.Position) == true ||
+                _trayMenu?.IsOpen == true)
+            {
+                return;
+            }
+
+            Dispatcher.InvokeAsync(
+                HideMainWindowIfInactive,
+                DispatcherPriority.Background);
         };
 
-        _trayIcon.LeftClick += () =>
+        _trayIcon.LeftClick += anchorPoint =>
         {
             if (_trayMenu != null)
                 _trayMenu.IsOpen = false;
 
-            ToggleMainWindow();
+            ToggleMainWindow(anchorPoint);
         };
         _trayIcon.RightClick += ShowTrayMenu;
 
@@ -90,7 +108,8 @@ public partial class App : System.Windows.Application
                 Shutdown();
         };
 
-        ShowMainWindow();
+        if (!startHidden)
+            ShowMainWindow();
     }
 
     private void ShowMainWindow()
@@ -98,7 +117,7 @@ public partial class App : System.Windows.Application
         _mainWindow?.ShowInBottomRight(GetInitialTrayPoint());
     }
 
-    private void ToggleMainWindow()
+    private void ToggleMainWindow(System.Drawing.Point anchorPoint)
     {
         if (_mainWindow == null)
             return;
@@ -109,7 +128,7 @@ public partial class App : System.Windows.Application
             return;
         }
 
-        _mainWindow.ShowInBottomRight(System.Windows.Forms.Cursor.Position);
+        _mainWindow.ShowInBottomRight(anchorPoint);
 
         if (_mainWindow.DataContext is MainWindowViewModel viewModel)
         {
@@ -140,9 +159,16 @@ public partial class App : System.Windows.Application
         if (_trayIcon == null)
             return;
 
-        _trayIcon.Update(
-            TrayBrightnessIcon.Create(averageBrightness),
-            GetTrayText(primaryBrightness));
+        try
+        {
+            _trayIcon.Update(
+                TrayBrightnessIcon.Create(averageBrightness),
+                GetTrayText(primaryBrightness));
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Failed to update tray icon: {ex.Message}");
+        }
     }
 
     private void QueueBrightnessAdjustment(
@@ -199,7 +225,23 @@ public partial class App : System.Windows.Application
             Style = (Style)FindResource("TrayContextMenuStyle")
         };
         menu.Items.Add(exitItem);
+        menu.Closed += (_, _) => HideMainWindowIfInactive();
         return menu;
+    }
+
+    private void HideMainWindowIfInactive()
+    {
+        if (_isExiting ||
+            _mainWindow?.IsVisible != true ||
+            _mainWindow.IsActive ||
+            _trayMenu?.IsOpen == true ||
+            _mainWindow.OwnedWindows.Cast<Window>().Any(window => window.IsVisible) ||
+            _trayIcon?.IsPointOverIcon(System.Windows.Forms.Cursor.Position) == true)
+        {
+            return;
+        }
+
+        _mainWindow.Hide();
     }
 
     private void ShowTrayMenu()

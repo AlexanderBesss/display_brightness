@@ -5,12 +5,14 @@ using System.Windows.Input;
 
 namespace DisplayBrightness.ViewModels;
 
-public class MonitorSliderViewModel : ViewModelBase
+public class MonitorSliderViewModel : ViewModelBase, IDisposable
 {
     private readonly MonitorInfo _monitor;
-    private readonly Action<int> _commitBrightness;
+    private readonly Func<int, bool> _commitBrightness;
     private readonly IOledCareService _oledCareService;
     private readonly IUserDialogService _dialogService;
+    private readonly CancellationTokenSource _lifetimeCancellation = new();
+    private bool _isDisposed;
 
     internal string DisplayName { get; }
     public string FriendlyName { get; }
@@ -60,12 +62,14 @@ public class MonitorSliderViewModel : ViewModelBase
     public ICommand RunPixelRefreshCommand { get; }
 
     private double _brightnessValue;
+    private int _committedBrightness;
     public double BrightnessValue
     {
         get => _brightnessValue;
         set
         {
-            if (SetProperty(ref _brightnessValue, value))
+            double clampedValue = Math.Clamp(value, 0, 100);
+            if (SetProperty(ref _brightnessValue, clampedValue))
                 OnPropertyChanged(nameof(BrightnessText));
         }
     }
@@ -75,7 +79,7 @@ public class MonitorSliderViewModel : ViewModelBase
     public MonitorSliderViewModel(
         MonitorInfo monitor,
         int initialBrightness,
-        Action<int> commitBrightness,
+        Func<int, bool> commitBrightness,
         IOledCareService oledCareService,
         IUserDialogService dialogService)
     {
@@ -84,6 +88,7 @@ public class MonitorSliderViewModel : ViewModelBase
         FriendlyName = monitor.FriendlyName;
         ModelName = monitor.ModelName;
         _brightnessValue = Math.Clamp(initialBrightness, 0, 100);
+        _committedBrightness = (int)_brightnessValue;
         _commitBrightness = commitBrightness;
         _oledCareService = oledCareService;
         _dialogService = dialogService;
@@ -93,12 +98,23 @@ public class MonitorSliderViewModel : ViewModelBase
             () => CanRunPixelRefresh);
 
         if (ShowOledCare)
-            AsyncHelper.FireAndForget(RefreshOledStatusAsync, "OLED initial status");
+        {
+            AsyncHelper.FireAndForget(
+                () => RefreshOledStatusAsync(_lifetimeCancellation.Token),
+                "OLED initial status");
+        }
     }
 
     public void CommitBrightness()
     {
-        _commitBrightness((int)BrightnessValue);
+        int brightness = (int)BrightnessValue;
+        if (_commitBrightness(brightness))
+        {
+            _committedBrightness = brightness;
+            return;
+        }
+
+        BrightnessValue = _committedBrightness;
     }
 
     internal bool AdjustBrightness(int delta)
@@ -109,25 +125,39 @@ public class MonitorSliderViewModel : ViewModelBase
             return false;
 
         BrightnessValue = adjustedBrightness;
-        _commitBrightness(adjustedBrightness);
-        return true;
+        if (_commitBrightness(adjustedBrightness))
+        {
+            _committedBrightness = adjustedBrightness;
+            return true;
+        }
+
+        BrightnessValue = _committedBrightness;
+        return false;
     }
 
-    private async Task RefreshOledStatusAsync()
+    private async Task RefreshOledStatusAsync(CancellationToken cancellationToken)
     {
         IsOledBusy = true;
         try
         {
-            OledCareStatus status = await _oledCareService.GetStatusAsync(_monitor);
-            ApplyOledStatus(status);
+            OledCareStatus status = await _oledCareService.GetStatusAsync(
+                _monitor,
+                cancellationToken);
+            if (!_isDisposed)
+                ApplyOledStatus(status);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
         }
         catch (Exception ex)
         {
-            OledStatusText = $"Status unavailable: {ex.Message}";
+            if (!_isDisposed)
+                OledStatusText = $"Status unavailable: {ex.Message}";
         }
         finally
         {
-            IsOledBusy = false;
+            if (!_isDisposed)
+                IsOledBusy = false;
         }
     }
 
@@ -177,5 +207,16 @@ public class MonitorSliderViewModel : ViewModelBase
 
         OnPropertyChanged(nameof(CanRunPixelRefresh));
         CommandManager.InvalidateRequerySuggested();
+    }
+
+    public void Dispose()
+    {
+        if (_isDisposed)
+            return;
+
+        _isDisposed = true;
+        _lifetimeCancellation.Cancel();
+        _lifetimeCancellation.Dispose();
+        GC.SuppressFinalize(this);
     }
 }

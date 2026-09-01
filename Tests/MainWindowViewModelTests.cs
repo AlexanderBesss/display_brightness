@@ -42,29 +42,60 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
-    public void OledHistory_ReappearsAfterMonitorReload()
+    public async Task OledHistory_ReappearsAfterMonitorReload()
     {
+        var now = new DateTimeOffset(2026, 9, 1, 9, 15, 0, TimeSpan.Zero);
+        var timeProvider = new AdjustableTimeProvider(now);
         var storage = new FakeStorageService();
         storage.OledHistory[@"MONITOR\MSI3CD7\instance"] =
             new OledPanelProtectHistory(
-                DateTimeOffset.UtcNow - TimeSpan.FromMinutes(10),
+                now - TimeSpan.FromMinutes(10),
                 100);
+        var display = new FakeDisplayService(oled: true);
         var viewModel = new MainWindowViewModel(
-            new FakeDisplayService(oled: true),
+            display,
             storage,
             new ReadyOledCareService(),
-            new RejectingDialogService());
+            new RejectingDialogService(),
+            timeProvider);
 
         Assert.EndsWith(
             "Panel Protect started",
             viewModel.Monitors.Single().LastPanelProtectExplanationText);
 
-        viewModel.RefreshCommand.Execute(null);
+        timeProvider.Advance(TimeSpan.FromMinutes(1));
+        await viewModel.RefreshIfStaleAsync();
 
+        Assert.Equal(2, display.EnumerationCount);
         Assert.EndsWith(
             "Panel Protect started",
             viewModel.Monitors.Single().LastPanelProtectExplanationText);
         viewModel.Monitors.Single().Dispose();
+    }
+
+    [Fact]
+    public async Task TrayRefresh_IsLimitedToOncePerMinute()
+    {
+        var now = new DateTimeOffset(2026, 9, 1, 9, 15, 0, TimeSpan.Zero);
+        var timeProvider = new AdjustableTimeProvider(now);
+        var display = new FakeDisplayService();
+        var viewModel = new MainWindowViewModel(
+            display,
+            new FakeStorageService(),
+            new UnsupportedOledCareService(),
+            new RejectingDialogService(),
+            timeProvider);
+
+        await viewModel.RefreshIfStaleAsync();
+        timeProvider.Advance(TimeSpan.FromSeconds(59));
+        await viewModel.RefreshIfStaleAsync();
+
+        Assert.Equal(1, display.EnumerationCount);
+
+        timeProvider.Advance(TimeSpan.FromSeconds(1));
+        await viewModel.RefreshIfStaleAsync();
+
+        Assert.Equal(2, display.EnumerationCount);
     }
 
     private sealed class FakeDisplayService : IDisplayService
@@ -87,8 +118,13 @@ public sealed class MainWindowViewModelTests
         }
 
         public int SetCount { get; private set; }
+        public int EnumerationCount { get; private set; }
 
-        public List<MonitorInfo> GetExternalMonitors() => [_monitor];
+        public List<MonitorInfo> GetExternalMonitors()
+        {
+            EnumerationCount++;
+            return [_monitor];
+        }
 
         public int? GetBrightness(MonitorInfo monitor) => 50;
 
@@ -187,5 +223,12 @@ public sealed class MainWindowViewModelTests
         public bool ConfirmPixelRefresh(
             MonitorInfo monitor,
             OledSupportLevel supportLevel) => false;
+    }
+
+    private sealed class AdjustableTimeProvider(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
+
+        public void Advance(TimeSpan amount) => now += amount;
     }
 }

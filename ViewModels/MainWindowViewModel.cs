@@ -8,14 +8,20 @@ namespace DisplayBrightness.ViewModels;
 
 public class MainWindowViewModel : ViewModelBase
 {
+    private static readonly TimeSpan AutomaticRefreshInterval =
+        TimeSpan.FromMinutes(1);
+
     private readonly IDisplayService _displayService;
     private readonly IStorageService _storageService;
     private readonly IOledCareService _oledCareService;
     private readonly IUserDialogService _dialogService;
+    private readonly TimeProvider _timeProvider;
     private Dictionary<string, int> _savedSettings =
         new(StringComparer.OrdinalIgnoreCase);
     private Dictionary<string, OledPanelProtectHistory> _oledPanelProtectHistory =
         new(StringComparer.OrdinalIgnoreCase);
+    private DateTimeOffset _lastAutomaticRefreshAtUtc;
+    private bool _isRefreshRunning;
 
     private bool _startOnStartup;
     public bool StartOnStartup
@@ -61,79 +67,70 @@ public class MainWindowViewModel : ViewModelBase
         IDisplayService? displayService = null,
         IStorageService? storageService = null,
         IOledCareService? oledCareService = null,
-        IUserDialogService? dialogService = null)
+        IUserDialogService? dialogService = null,
+        TimeProvider? timeProvider = null)
     {
         _displayService = displayService ?? new DisplayService();
         _storageService = storageService ?? new StorageService();
         _oledCareService = oledCareService ?? new OledCareService();
         _dialogService = dialogService ?? new UserDialogService();
+        _timeProvider = timeProvider ?? TimeProvider.System;
 
-        RefreshCommand = new RelayCommand(_ => LoadMonitors());
+        RefreshCommand = new AsyncRelayCommand(ForceRefreshAsync);
         _startOnStartup = _storageService.GetStartOnStartup();
         LoadMonitors();
+        _lastAutomaticRefreshAtUtc = _timeProvider.GetUtcNow();
+    }
+
+    internal Task RefreshIfStaleAsync()
+    {
+        DateTimeOffset now = _timeProvider.GetUtcNow();
+        TimeSpan elapsed = now - _lastAutomaticRefreshAtUtc;
+        if (_isRefreshRunning ||
+            (elapsed >= TimeSpan.Zero && elapsed < AutomaticRefreshInterval))
+        {
+            return Task.CompletedTask;
+        }
+
+        // Record the attempt before starting it so repeated tray opens are
+        // coalesced even if monitor I/O is slow or temporarily unavailable.
+        _lastAutomaticRefreshAtUtc = now;
+        return RefreshMonitorsAsync();
+    }
+
+    private async Task ForceRefreshAsync()
+    {
+        _lastAutomaticRefreshAtUtc = _timeProvider.GetUtcNow();
+        await RefreshMonitorsAsync();
+    }
+
+    private async Task RefreshMonitorsAsync()
+    {
+        if (_isRefreshRunning)
+            return;
+
+        _isRefreshRunning = true;
+        try
+        {
+            List<MonitorReading> readings = await Task.Run(ReadMonitors);
+            ApplyMonitorReadings(readings);
+        }
+        catch
+        {
+            // Keep the last usable view. A transient monitor query should not
+            // blank the popup while the next automatic retry is throttled.
+        }
+        finally
+        {
+            _isRefreshRunning = false;
+        }
     }
 
     private void LoadMonitors()
     {
         try
         {
-            var monitors = _displayService.GetExternalMonitors();
-
-            _savedSettings = _storageService.LoadSettings();
-            _oledPanelProtectHistory =
-                _storageService.LoadOledPanelProtectHistory();
-            ClearMonitors();
-
-            string? primaryDisplayName = System.Windows.Forms.Screen.PrimaryScreen?.DeviceName;
-
-            var monitorVms = new List<MonitorSliderViewModel>();
-
-            foreach (var monitor in monitors)
-            {
-                int? currentBrightness = null;
-                try
-                {
-                    currentBrightness = _displayService.GetBrightness(monitor);
-                }
-                catch
-                {
-                    // A single unavailable display must not hide the other displays.
-                }
-
-                var initialBrightness = currentBrightness
-                    ?? (_savedSettings.TryGetValue(monitor.DevicePath, out var saved)
-                        ? saved
-                        : 50);
-
-                var vm = new MonitorSliderViewModel(
-                    monitor,
-                    initialBrightness,
-                    brightness => CommitBrightness(monitor, brightness),
-                    _oledCareService,
-                    _dialogService,
-                    _oledPanelProtectHistory.TryGetValue(
-                        monitor.DevicePath,
-                        out OledPanelProtectHistory? history)
-                            ? history
-                            : null,
-                    entry => SaveOledPanelProtectHistory(monitor, entry));
-
-                vm.IsPrimary = string.Equals(
-                    monitor.DisplayName,
-                    primaryDisplayName,
-                    StringComparison.OrdinalIgnoreCase);
-
-                monitorVms.Add(vm);
-            }
-
-            foreach (var vm in monitorVms.Where(monitor => monitor.IsPrimary)
-                .Concat(monitorVms.Where(monitor => !monitor.IsPrimary)))
-            {
-                vm.PropertyChanged += Monitor_PropertyChanged;
-                Monitors.Add(vm);
-            }
-
-            NotifyMonitorSummaryChanged();
+            ApplyMonitorReadings(ReadMonitors());
         }
         catch
         {
@@ -211,6 +208,91 @@ public class MainWindowViewModel : ViewModelBase
         }
     }
 
+    private List<MonitorReading> ReadMonitors()
+    {
+        var readings = new List<MonitorReading>();
+        foreach (MonitorInfo monitor in _displayService.GetExternalMonitors())
+        {
+            int? brightness = null;
+            try
+            {
+                brightness = _displayService.GetBrightness(monitor);
+            }
+            catch
+            {
+                // A single unavailable display must not hide the other displays.
+            }
+
+            readings.Add(new MonitorReading(monitor, brightness));
+        }
+
+        return readings;
+    }
+
+    private void ApplyMonitorReadings(List<MonitorReading> readings)
+    {
+        Dictionary<string, int> savedSettings = _storageService.LoadSettings();
+        Dictionary<string, OledPanelProtectHistory> oledPanelProtectHistory =
+            _storageService.LoadOledPanelProtectHistory();
+
+        string? primaryDisplayName =
+            System.Windows.Forms.Screen.PrimaryScreen?.DeviceName;
+        var monitorVms = new List<MonitorSliderViewModel>();
+
+        try
+        {
+            foreach (MonitorReading reading in readings)
+            {
+                MonitorInfo monitor = reading.Monitor;
+                int initialBrightness = reading.Brightness
+                    ?? (savedSettings.TryGetValue(
+                        monitor.DevicePath,
+                        out int saved)
+                            ? saved
+                            : 50);
+
+                var vm = new MonitorSliderViewModel(
+                    monitor,
+                    initialBrightness,
+                    brightness => CommitBrightness(monitor, brightness),
+                    _oledCareService,
+                    _dialogService,
+                    oledPanelProtectHistory.TryGetValue(
+                        monitor.DevicePath,
+                        out OledPanelProtectHistory? history)
+                        ? history
+                        : null,
+                    entry => SaveOledPanelProtectHistory(monitor, entry));
+
+                vm.IsPrimary = string.Equals(
+                    monitor.DisplayName,
+                    primaryDisplayName,
+                    StringComparison.OrdinalIgnoreCase);
+                monitorVms.Add(vm);
+            }
+        }
+        catch
+        {
+            foreach (MonitorSliderViewModel vm in monitorVms)
+                vm.Dispose();
+            throw;
+        }
+
+        _savedSettings = savedSettings;
+        _oledPanelProtectHistory = oledPanelProtectHistory;
+        ClearMonitors();
+
+        foreach (MonitorSliderViewModel vm in
+            monitorVms.Where(monitor => monitor.IsPrimary)
+                .Concat(monitorVms.Where(monitor => !monitor.IsPrimary)))
+        {
+            vm.PropertyChanged += Monitor_PropertyChanged;
+            Monitors.Add(vm);
+        }
+
+        NotifyMonitorSummaryChanged();
+    }
+
     private void SaveOledPanelProtectHistory(
         MonitorInfo monitor,
         OledPanelProtectHistory history)
@@ -221,4 +303,6 @@ public class MainWindowViewModel : ViewModelBase
         _oledPanelProtectHistory[monitor.DevicePath] = history;
         _storageService.SaveOledPanelProtectHistory(_oledPanelProtectHistory);
     }
+
+    private sealed record MonitorReading(MonitorInfo Monitor, int? Brightness);
 }

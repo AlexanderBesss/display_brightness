@@ -6,6 +6,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Threading;
 using DisplayBrightness.Services;
+using DisplayBrightness.Utilities;
 using DisplayBrightness.ViewModels;
 
 namespace DisplayBrightness;
@@ -130,9 +131,9 @@ public partial class App : System.Windows.Application
 
         if (_mainWindow.DataContext is MainWindowViewModel viewModel)
         {
-            Dispatcher.InvokeAsync(
-                () => viewModel.RefreshCommand.Execute(null),
-                DispatcherPriority.Background);
+            AsyncHelper.FireAndForget(
+                viewModel.RefreshIfStaleAsync,
+                "tray display refresh");
         }
     }
 

@@ -366,8 +366,16 @@
                                                         <ColumnDefinition Width="*"/>
                                                         <ColumnDefinition Width="Auto"/>
                                                     </Grid.ColumnDefinitions>
-                                                    <TextBlock Margin="0,0,10,0" VerticalAlignment="Center" Text="{Binding OledSummaryText}" FontSize="9.5"
-                                                               Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap"/>
+                                                    <StackPanel Margin="0,0,10,0" VerticalAlignment="Center">
+                                                        <WrapPanel>
+                                                            <TextBlock Text="{Binding OledStatusNumberText}" FontSize="12" FontWeight="Bold" Foreground="{StaticResource MutedTextBrush}"/>
+                                                            <TextBlock Text="{Binding OledStatusSuffixText}" FontSize="12" Foreground="{StaticResource MutedTextBrush}"/>
+                                                        </WrapPanel>
+                                                        <WrapPanel Margin="0,2,0,0">
+                                                            <TextBlock Text="{Binding LastPanelProtectValueText}" FontSize="12" FontWeight="Bold" Foreground="{StaticResource MutedTextBrush}"/>
+                                                            <TextBlock Text="{Binding LastPanelProtectExplanationText}" FontSize="12" Foreground="{StaticResource MutedTextBrush}"/>
+                                                        </WrapPanel>
+                                                    </StackPanel>
                                                     <Button Grid.Column="1" Style="{StaticResource PanelProtectIconButtonStyle}"
                                                             Command="{Binding RunPixelRefreshCommand}"
                                                             ToolTip="Run Panel Protect"

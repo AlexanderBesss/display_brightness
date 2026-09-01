@@ -129,10 +129,15 @@ settings listed above.
 
 The app therefore keeps a separate, per-monitor history only for Panel Protect
 commands that it successfully sends. It records the UTC dispatch time and the
-current VCP `0xC0` usage-hours value when available. The displayed elapsed time
-is wall-clock time since dispatch; it is not the monitor's internal last-run
-value and cannot detect refreshes started from the OSD or other software. This
-history is stored in `oled-care-history.json` next to the application executable.
+current VCP `0xC0` usage-hours value when available. The app uses wall-clock
+time for minute precision while it agrees with the monitor-reported usage delta
+within one hour. If the difference exceeds one hour, the monitor delta becomes
+authoritative and the UI shows whole panel hours. This avoids counting long
+periods while the monitor was off. While history exists, the app rereads only
+VCP `0xC0` once per minute so the monitor-authoritative value can advance without
+repeating the HID status queries. It is still app-launched history and cannot
+detect refreshes started from the OSD or other software. The history is stored in
+`oled-care-history.json` next to the application executable.
 
 ## 6. Safety constraints
 

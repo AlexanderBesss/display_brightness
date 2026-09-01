@@ -10,6 +10,10 @@ public interface IOledCareService
         MonitorInfo monitor,
         CancellationToken cancellationToken = default);
 
+    Task<int?> GetTotalUsageHoursAsync(
+        MonitorInfo monitor,
+        CancellationToken cancellationToken = default);
+
     Task<PixelRefreshResult> StartPixelRefreshAsync(
         MonitorInfo monitor,
         CancellationToken cancellationToken = default);

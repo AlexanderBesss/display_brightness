@@ -47,7 +47,7 @@ public partial class App : System.Windows.Application
 
         var viewModel = (MainWindowViewModel)_mainWindow.DataContext;
         _trayIcon = new NativeTrayIcon(
-            TrayBrightnessIcon.Create(viewModel.AverageBrightness),
+            TrayBrightnessIcon.Create(viewModel.PrimaryBrightness),
             GetTrayText(viewModel.PrimaryBrightness));
 
         _trayIcon.MouseWheel += detents =>
@@ -56,10 +56,8 @@ public partial class App : System.Windows.Application
 
         viewModel.PropertyChanged += (_, args) =>
         {
-            if (args.PropertyName == nameof(MainWindowViewModel.AverageBrightness))
-                UpdateTrayIcon(
-                    viewModel.AverageBrightness,
-                    viewModel.PrimaryBrightness);
+            if (args.PropertyName == nameof(MainWindowViewModel.PrimaryBrightness))
+                UpdateTrayIcon(viewModel.PrimaryBrightness);
             else if (args.PropertyName == nameof(MainWindowViewModel.CanAdjustBrightness) &&
                      _trayIcon != null)
                 _trayIcon.IsWheelEnabled = viewModel.CanAdjustBrightness;
@@ -154,7 +152,7 @@ public partial class App : System.Windows.Application
         return new System.Drawing.Point(workArea.Right - 24, workArea.Bottom - 1);
     }
 
-    private void UpdateTrayIcon(int? averageBrightness, int? primaryBrightness)
+    private void UpdateTrayIcon(int? primaryBrightness)
     {
         if (_trayIcon == null)
             return;
@@ -162,7 +160,7 @@ public partial class App : System.Windows.Application
         try
         {
             _trayIcon.Update(
-                TrayBrightnessIcon.Create(averageBrightness),
+                TrayBrightnessIcon.Create(primaryBrightness),
                 GetTrayText(primaryBrightness));
         }
         catch (Exception ex)

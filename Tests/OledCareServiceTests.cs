@@ -48,6 +48,21 @@ public sealed class OledCareServiceTests
     }
 
     [Fact]
+    public async Task GetTotalUsageHours_ReadsVcpWithoutContactingHid()
+    {
+        var transport = new FakeTransport();
+        var service = new OledCareService(transport, _ => 10250);
+
+        int? totalUsageHours = await service.GetTotalUsageHoursAsync(
+            CreateMsiMonitor());
+
+        Assert.Equal(10250, totalUsageHours);
+        Assert.Equal(0, transport.GetCount);
+        Assert.Equal(0, transport.SetCount);
+        Assert.Equal(0, transport.NoAckSetCount);
+    }
+
+    [Fact]
     public async Task GetStatus_ReadsRefreshRateAndResolvesMod256Wrap()
     {
         var transport = new FakeTransport

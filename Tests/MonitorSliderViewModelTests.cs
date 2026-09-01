@@ -49,9 +49,11 @@ public sealed class MonitorSliderViewModelTests
 
         Assert.Equal(now, savedHistory!.LastStartedAtUtc);
         Assert.Equal(100, savedHistory.TotalUsageHoursAtStart);
+        Assert.Equal("100", viewModel.OledStatusNumberText);
+        Assert.Equal(" total panel hours", viewModel.OledStatusSuffixText);
         Assert.Equal(
-            "100 total panel hours · Last panel protect started: just now",
-            viewModel.OledSummaryText);
+            "Just now · Panel Protect started",
+            viewModel.LastPanelProtectExplanationText);
         viewModel.Dispose();
     }
 
@@ -61,7 +63,7 @@ public sealed class MonitorSliderViewModelTests
         var now = new DateTimeOffset(2026, 9, 1, 9, 15, 0, TimeSpan.Zero);
         var originalHistory = new OledPanelProtectHistory(
             now - TimeSpan.FromMinutes(30),
-            90);
+            100);
         var oledService = new FakeOledCareService
         {
             StartResult = new PixelRefreshResult(false, "could not start")
@@ -82,9 +84,10 @@ public sealed class MonitorSliderViewModelTests
         await WaitUntilAsync(() => oledService.StartCount == 1);
 
         Assert.Equal(0, saveCount);
+        Assert.Equal("30m", viewModel.LastPanelProtectValueText);
         Assert.Equal(
-            "Last panel protect started: 30m ago",
-            viewModel.LastPanelProtectText);
+            " ago · Panel Protect started",
+            viewModel.LastPanelProtectExplanationText);
         viewModel.Dispose();
     }
 
@@ -103,7 +106,7 @@ public sealed class MonitorSliderViewModelTests
             _ => true,
             oledService,
             new AcceptingDialogService(),
-            new OledPanelProtectHistory(now - TimeSpan.FromHours(2), 90),
+            new OledPanelProtectHistory(now - TimeSpan.FromHours(2), 100),
             _ => saveCount++,
             new FixedTimeProvider(now));
         await WaitUntilAsync(() => viewModel.CanRunPixelRefresh);
@@ -112,20 +115,17 @@ public sealed class MonitorSliderViewModelTests
         await WaitUntilAsync(() => viewModel.OledStatusText.Contains("transport failed"));
 
         Assert.Equal(0, saveCount);
-        Assert.Equal(
-            "Last panel protect started: 2h 0m ago",
-            viewModel.LastPanelProtectText);
+        Assert.Equal("0 panel hours", viewModel.LastPanelProtectValueText);
         viewModel.Dispose();
     }
 
     [Theory]
-    [InlineData(null, "Last panel protect: not tracked yet")]
-    [InlineData(-5, "Last panel protect started: just now")]
-    [InlineData(0, "Last panel protect started: just now")]
-    [InlineData(1, "Last panel protect started: 1m ago")]
-    [InlineData(59, "Last panel protect started: 59m ago")]
-    [InlineData(60, "Last panel protect started: 1h 0m ago")]
-    [InlineData(130, "Last panel protect started: 2h 10m ago")]
+    [InlineData(null, "Not tracked yet · Panel Protect")]
+    [InlineData(-5, "Just now · Panel Protect started")]
+    [InlineData(1, "1m ago · Panel Protect started")]
+    [InlineData(59, "59m ago · Panel Protect started")]
+    [InlineData(60, "1h 0m ago · Panel Protect started")]
+    [InlineData(130, "2h 10m ago · Panel Protect started")]
     public void LastPanelProtectText_FormatsElapsedWallTime(
         int? elapsedMinutes,
         string expected)
@@ -144,8 +144,85 @@ public sealed class MonitorSliderViewModelTests
         Assert.Equal(expected, result);
     }
 
+    [Theory]
+    [InlineData(100, 101, 180, "1 panel hour ago · Panel Protect started")]
+    [InlineData(100, 102, 130, "2h 10m ago · Panel Protect started")]
+    public void LastPanelProtectText_ChoosesMonitorOrWallClockElapsedTime(
+        int startedAtHours,
+        int currentHours,
+        int elapsedMinutes,
+        string expected)
+    {
+        var now = new DateTimeOffset(2026, 9, 1, 9, 15, 0, TimeSpan.Zero);
+        var history = new OledPanelProtectHistory(
+            now - TimeSpan.FromMinutes(elapsedMinutes),
+            startedAtHours);
+
+        string result = MonitorSliderViewModel.FormatLastPanelProtectText(
+            history,
+            now,
+            currentHours);
+
+        Assert.Equal(expected, result);
+    }
+
     [Fact]
-    public void PersistedHistory_IsDisplayedAndTimerStopsOnDispose()
+    public async Task OledTextParts_SeparateValueFromExplanation()
+    {
+        var now = new DateTimeOffset(2026, 9, 1, 9, 15, 0, TimeSpan.Zero);
+        var oledService = new FakeOledCareService
+        {
+            Status = new OledCareStatus(
+                OledSupportLevel.Verified,
+                OledConnectionState.Ready,
+                new OledPanelInfo(1, 102),
+                "ready")
+        };
+        var viewModel = new MonitorSliderViewModel(
+            CreateMonitor(),
+            50,
+            _ => true,
+            oledService,
+            new RejectingDialogService(),
+            new OledPanelProtectHistory(now - TimeSpan.FromMinutes(130), 100),
+            timeProvider: new FixedTimeProvider(now));
+        await WaitUntilAsync(() => viewModel.CanRunPixelRefresh);
+
+        Assert.Equal("2h 10m", viewModel.LastPanelProtectValueText);
+        Assert.Equal(
+            " ago · Panel Protect started",
+            viewModel.LastPanelProtectExplanationText);
+        viewModel.Dispose();
+    }
+
+    [Fact]
+    public async Task UsageHoursRefresh_AdvancesMonitorAuthoritativeElapsedTime()
+    {
+        var now = new DateTimeOffset(2026, 9, 1, 9, 15, 0, TimeSpan.Zero);
+        var oledService = new FakeOledCareService
+        {
+            ReportedTotalUsageHours = 105
+        };
+        var viewModel = new MonitorSliderViewModel(
+            CreateMonitor(),
+            50,
+            _ => true,
+            oledService,
+            new RejectingDialogService(),
+            new OledPanelProtectHistory(now - TimeSpan.FromHours(10), 100),
+            timeProvider: new FixedTimeProvider(now));
+        await WaitUntilAsync(() => viewModel.CanRunPixelRefresh);
+        Assert.Equal("0 panel hours", viewModel.LastPanelProtectValueText);
+
+        await viewModel.RefreshTotalUsageHoursAsync();
+
+        Assert.Equal(1, oledService.UsageHoursReadCount);
+        Assert.Equal("5 panel hours", viewModel.LastPanelProtectValueText);
+        viewModel.Dispose();
+    }
+
+    [Fact]
+    public void PanelProtectHistoryTimer_StopsOnDispose()
     {
         var now = new DateTimeOffset(2026, 9, 1, 9, 15, 0, TimeSpan.Zero);
         var viewModel = new MonitorSliderViewModel(
@@ -154,12 +231,9 @@ public sealed class MonitorSliderViewModelTests
             _ => true,
             new FakeOledCareService(),
             new RejectingDialogService(),
-            new OledPanelProtectHistory(now - TimeSpan.FromMinutes(75), 90),
+            new OledPanelProtectHistory(now - TimeSpan.FromMinutes(75), 100),
             timeProvider: new FixedTimeProvider(now));
 
-        Assert.Equal(
-            "Last panel protect started: 1h 15m ago",
-            viewModel.LastPanelProtectText);
         Assert.True(viewModel.IsPanelProtectHistoryTimerRunning);
 
         viewModel.Dispose();
@@ -324,6 +398,8 @@ public sealed class MonitorSliderViewModelTests
         public PixelRefreshResult StartResult { get; set; } =
             new(true, "started");
         public Exception? StartException { get; set; }
+        public int? ReportedTotalUsageHours { get; set; }
+        public int UsageHoursReadCount { get; private set; }
         public OledCareStatus Status { get; set; } = new(
             OledSupportLevel.Verified,
             OledConnectionState.Ready,
@@ -337,6 +413,15 @@ public sealed class MonitorSliderViewModelTests
             MonitorInfo monitor,
             CancellationToken cancellationToken = default) =>
             Task.FromResult(Status);
+
+        public Task<int?> GetTotalUsageHoursAsync(
+            MonitorInfo monitor,
+            CancellationToken cancellationToken = default)
+        {
+            UsageHoursReadCount++;
+            return Task.FromResult(
+                ReportedTotalUsageHours ?? Status.PanelInfo?.TotalUsageHours);
+        }
 
         public Task<PixelRefreshResult> StartPixelRefreshAsync(
             MonitorInfo monitor,
@@ -381,6 +466,11 @@ public sealed class MonitorSliderViewModelTests
 
             throw new InvalidOperationException("Unreachable.");
         }
+
+        public Task<int?> GetTotalUsageHoursAsync(
+            MonitorInfo monitor,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<int?>(null);
 
         public Task<PixelRefreshResult> StartPixelRefreshAsync(
             MonitorInfo monitor,

@@ -41,8 +41,8 @@ public sealed class OledCareService : IOledCareService
                 "OLED Care is not supported for this display.");
         }
 
-        int? totalUsageHours = await Task.Run(
-            () => _usageHoursReader(monitor),
+        int? totalUsageHours = await GetTotalUsageHoursAsync(
+            monitor,
             cancellationToken).ConfigureAwait(false);
 
         HidOperationResult result = await _transport.GetAsync(
@@ -87,6 +87,18 @@ public sealed class OledCareService : IOledCareService
             panelInfo,
             message,
             refreshRateHz);
+    }
+
+    public async Task<int?> GetTotalUsageHoursAsync(
+        MonitorInfo monitor,
+        CancellationToken cancellationToken = default)
+    {
+        if (OledCompatibilityRegistry.Find(monitor) == null)
+            return null;
+
+        return await Task.Run(
+            () => _usageHoursReader(monitor),
+            cancellationToken).ConfigureAwait(false);
     }
 
     // The 00170 register reports the refresh rate mod 256, so a 360 Hz mode

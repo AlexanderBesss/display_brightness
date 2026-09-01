@@ -55,15 +55,15 @@ public sealed class MainWindowViewModelTests
             new ReadyOledCareService(),
             new RejectingDialogService());
 
-        Assert.StartsWith(
-            "Last panel protect started:",
-            viewModel.Monitors.Single().LastPanelProtectText);
+        Assert.EndsWith(
+            "Panel Protect started",
+            viewModel.Monitors.Single().LastPanelProtectExplanationText);
 
         viewModel.RefreshCommand.Execute(null);
 
-        Assert.StartsWith(
-            "Last panel protect started:",
-            viewModel.Monitors.Single().LastPanelProtectText);
+        Assert.EndsWith(
+            "Panel Protect started",
+            viewModel.Monitors.Single().LastPanelProtectExplanationText);
         viewModel.Monitors.Single().Dispose();
     }
 
@@ -146,6 +146,11 @@ public sealed class MainWindowViewModelTests
             CancellationToken cancellationToken = default) =>
             throw new InvalidOperationException("Unsupported displays must not be queried.");
 
+        public Task<int?> GetTotalUsageHoursAsync(
+            MonitorInfo monitor,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("Unsupported displays must not be queried.");
+
         public Task<PixelRefreshResult> StartPixelRefreshAsync(
             MonitorInfo monitor,
             CancellationToken cancellationToken = default) =>
@@ -165,6 +170,11 @@ public sealed class MainWindowViewModelTests
                 OledConnectionState.Ready,
                 new OledPanelInfo(1, 100),
                 "ready"));
+
+        public Task<int?> GetTotalUsageHoursAsync(
+            MonitorInfo monitor,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<int?>(100);
 
         public Task<PixelRefreshResult> StartPixelRefreshAsync(
             MonitorInfo monitor,

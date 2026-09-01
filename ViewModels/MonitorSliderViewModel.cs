@@ -17,6 +17,8 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
     private readonly DispatcherTimer? _panelProtectHistoryTimer;
     private readonly CancellationTokenSource _lifetimeCancellation = new();
     private OledPanelProtectHistory? _panelProtectHistory;
+    private int? _currentTotalUsageHours;
+    private bool _isUsageHoursRefreshRunning;
     private bool _isDisposed;
 
     internal string DisplayName { get; }
@@ -64,22 +66,30 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
         private set
         {
             if (SetProperty(ref _oledStatusText, value))
-                OnPropertyChanged(nameof(OledSummaryText));
+                OnPropertyChanged(nameof(OledStatusSuffixText));
         }
     }
 
-    private string _lastPanelProtectText = "Last panel protect: not tracked yet";
-    public string LastPanelProtectText
+    public string OledStatusNumberText =>
+        _currentTotalUsageHours?.ToString("N0") ?? string.Empty;
+    public string OledStatusSuffixText => _currentTotalUsageHours.HasValue
+        ? " total panel hours"
+        : OledStatusText;
+
+    private string _lastPanelProtectValueText = string.Empty;
+    public string LastPanelProtectValueText
     {
-        get => _lastPanelProtectText;
-        private set
-        {
-            if (SetProperty(ref _lastPanelProtectText, value))
-                OnPropertyChanged(nameof(OledSummaryText));
-        }
+        get => _lastPanelProtectValueText;
+        private set => SetProperty(ref _lastPanelProtectValueText, value);
     }
 
-    public string OledSummaryText => $"{OledStatusText} · {LastPanelProtectText}";
+    private string _lastPanelProtectExplanationText =
+        "Not tracked yet · Panel Protect";
+    public string LastPanelProtectExplanationText
+    {
+        get => _lastPanelProtectExplanationText;
+        private set => SetProperty(ref _lastPanelProtectExplanationText, value);
+    }
 
     internal bool IsPanelProtectHistoryTimerRunning =>
         _panelProtectHistoryTimer?.IsEnabled == true;
@@ -213,7 +223,7 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
             {
                 _panelProtectHistory = new OledPanelProtectHistory(
                     _timeProvider.GetUtcNow(),
-                    _oledStatus?.PanelInfo?.TotalUsageHours);
+                    _currentTotalUsageHours);
                 UpdateLastPanelProtectText();
 
                 try
@@ -248,6 +258,7 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
     private void ApplyOledStatus(OledCareStatus status)
     {
         _oledStatus = status;
+        SetCurrentTotalUsageHours(status.PanelInfo?.TotalUsageHours);
 
         if (status.RefreshRateHz is int refreshRateHz)
         {
@@ -267,41 +278,130 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
             OledStatusText = status.Message;
         }
 
+        UpdateLastPanelProtectText();
+
         OnPropertyChanged(nameof(CanRunPixelRefresh));
         CommandManager.InvalidateRequerySuggested();
     }
 
     internal static string FormatLastPanelProtectText(
         OledPanelProtectHistory? history,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        int? currentTotalUsageHours = null) =>
+        FormatLastPanelProtectTextParts(
+            history,
+            now,
+            currentTotalUsageHours).FullText;
+
+    private static PanelProtectTextParts FormatLastPanelProtectTextParts(
+        OledPanelProtectHistory? history,
+        DateTimeOffset now,
+        int? currentTotalUsageHours)
     {
         if (history == null)
-            return "Last panel protect: not tracked yet";
+            return new(string.Empty,
+                "Not tracked yet · Panel Protect");
 
         TimeSpan elapsed = now - history.LastStartedAtUtc;
         if (elapsed < TimeSpan.FromMinutes(1))
-            return "Last panel protect started: just now";
+            return new(string.Empty,
+                "Just now · Panel Protect started");
+
+        if (currentTotalUsageHours is int currentHours &&
+            history.TotalUsageHoursAtStart is int startedAtHours &&
+            currentHours >= startedAtHours)
+        {
+            int panelHoursElapsed = currentHours - startedAtHours;
+            double clockDifference = Math.Abs(
+                elapsed.TotalHours - panelHoursElapsed);
+            if (clockDifference > 1)
+            {
+                string unit = panelHoursElapsed == 1
+                    ? "panel hour"
+                    : "panel hours";
+                return new(
+                    $"{panelHoursElapsed:N0} {unit}",
+                    " ago · Panel Protect started");
+            }
+        }
 
         long totalMinutes = (long)Math.Floor(elapsed.TotalMinutes);
         if (totalMinutes < 60)
-            return $"Last panel protect started: {totalMinutes}m ago";
+        {
+            return new(
+                $"{totalMinutes}m",
+                " ago · Panel Protect started");
+        }
 
         long hours = totalMinutes / 60;
         long minutes = totalMinutes % 60;
-        return $"Last panel protect started: {hours}h {minutes}m ago";
+        return new(
+            $"{hours}h {minutes}m",
+            " ago · Panel Protect started");
     }
 
     private void UpdateLastPanelProtectText()
     {
-        LastPanelProtectText = FormatLastPanelProtectText(
+        PanelProtectTextParts parts = FormatLastPanelProtectTextParts(
             _panelProtectHistory,
-            _timeProvider.GetUtcNow());
+            _timeProvider.GetUtcNow(),
+            _currentTotalUsageHours);
+        LastPanelProtectValueText = parts.Value;
+        LastPanelProtectExplanationText = parts.Explanation;
     }
 
-    private void PanelProtectHistoryTimer_Tick(object? sender, EventArgs e)
+    private void SetCurrentTotalUsageHours(int? value)
     {
-        if (!_isDisposed)
-            UpdateLastPanelProtectText();
+        if (_currentTotalUsageHours == value)
+            return;
+
+        _currentTotalUsageHours = value;
+        OnPropertyChanged(nameof(OledStatusNumberText));
+        OnPropertyChanged(nameof(OledStatusSuffixText));
+    }
+
+    private async void PanelProtectHistoryTimer_Tick(object? sender, EventArgs e)
+    {
+        if (_isDisposed)
+            return;
+
+        UpdateLastPanelProtectText();
+        await RefreshTotalUsageHoursAsync();
+    }
+
+    internal async Task RefreshTotalUsageHoursAsync()
+    {
+        if (_isDisposed ||
+            _panelProtectHistory == null ||
+            IsOledBusy ||
+            _isUsageHoursRefreshRunning)
+            return;
+
+        _isUsageHoursRefreshRunning = true;
+        try
+        {
+            int? totalUsageHours = await _oledCareService.GetTotalUsageHoursAsync(
+                _monitor,
+                _lifetimeCancellation.Token);
+            if (!_isDisposed && totalUsageHours is >= 0)
+            {
+                SetCurrentTotalUsageHours(totalUsageHours);
+                OledStatusText = $"{totalUsageHours:N0} total panel hours";
+                UpdateLastPanelProtectText();
+            }
+        }
+        catch (OperationCanceledException)
+            when (_lifetimeCancellation.IsCancellationRequested)
+        {
+        }
+        catch
+        {
+            // Keep the last known monitor value and retry on the next tick.
+        }
+        finally
+        {
+            _isUsageHoursRefreshRunning = false;
+        }
     }
 
     public void Dispose()
@@ -318,5 +418,12 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
         _lifetimeCancellation.Cancel();
         _lifetimeCancellation.Dispose();
         GC.SuppressFinalize(this);
+    }
+
+    private sealed record PanelProtectTextParts(
+        string Value,
+        string Explanation)
+    {
+        public string FullText => $"{Value}{Explanation}";
     }
 }

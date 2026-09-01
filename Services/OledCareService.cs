@@ -61,6 +61,16 @@ public sealed class OledCareService : IOledCareService
                 result.Message);
         }
 
+        HidOperationResult refreshResult = await _transport.GetAsync(
+            profile.HidVendorId,
+            profile.HidProductIds,
+            profile.RefreshRateCode,
+            cancellationToken).ConfigureAwait(false);
+
+        int? refreshRateHz = refreshResult.State == HidOperationState.Success
+            ? ResolveRefreshRate(refreshResult.Value, monitor.RefreshRateHz)
+            : null;
+
         OledPanelInfo? panelInfo = OledValueParser.ParsePanelInfo(
             result.Value,
             totalUsageHours);
@@ -75,7 +85,35 @@ public sealed class OledCareService : IOledCareService
             profile.SupportLevel,
             OledConnectionState.Ready,
             panelInfo,
-            message);
+            message,
+            refreshRateHz);
+    }
+
+    // The 00170 register reports the refresh rate mod 256, so a 360 Hz mode
+    // reads 104. Pick the candidate (raw + 256k) closest to the OS-reported
+    // rate so >255 Hz modes resolve correctly.
+    internal static int? ResolveRefreshRate(string? rawValue, double osHz)
+    {
+        if (!int.TryParse(rawValue, out int value) || value < 0)
+            return null;
+
+        if (osHz <= 0)
+            return value;
+
+        int resolved = value;
+        double bestDistance = Math.Abs(value - osHz);
+        for (int k = 1; k <= 3; k++)
+        {
+            int candidate = value + 256 * k;
+            double distance = Math.Abs(candidate - osHz);
+            if (distance < bestDistance)
+            {
+                resolved = candidate;
+                bestDistance = distance;
+            }
+        }
+
+        return resolved;
     }
 
     public async Task<PixelRefreshResult> StartPixelRefreshAsync(

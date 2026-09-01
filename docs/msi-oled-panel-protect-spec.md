@@ -84,6 +84,49 @@ trigger in the blob:
 | 114    | Protect notice       |
 | 115–126| Detection settings   |
 
+## 5.1 Probing results on this unit (271QRX, FW 018, 2026-09-01)
+
+- The 168-byte feature report (ID `0x11`) exists, but GETs of `5800<00`
+  (GetAllFunc) and `5800<10` (GetAllBeh) return an all-zero payload for every
+  report ID tried (`0x00`–`0x21`), and sending GetAllFunc as a short command
+  yields no reply within 12 s. The long-command channel is **not readable**
+  on this firmware (X50-generation blobs do not apply here).
+- Full short-code sweep (`001xx` + `00;xx` blocks + GI base-table codes):
+  78 codes respond, **every value is 3-digit (000–999) or a string** — nothing
+  carries a 4-digit counter. Notable reads:
+
+  | Code    | Value                | Meaning                  |
+  | ------- | -------------------- | ------------------------ |
+  | `00130` | `CD7A014100250`      | Serial number            |
+  | `001<0` | `018`                | Firmware version         |
+  | `001?0` | `SDC QMC265FF01_D01` | Panel model              |
+  | `00150` | `V23`                | Display controller       |
+  | `00170` | `104`                | Current refresh rate in Hz, **mod 256** (unit runs a 360 Hz mode, reads 104 = 360 mod 256; stable across samples, GET-only live read, not a counter) |
+  | `00100` | `001`                | Power state              |
+  | `00;20` | `001`                | Static-screen detect on  |
+  | `00;23` | `006`                | SSD reducing level       |
+  | `00;50` | `001`                | Multi-logo detect on     |
+  | `00;60` | `001`                | Taskbar detect on        |
+  | `00;70` | `001`                | Boundary detect on       |
+
+- DDC/CI VCP sweep (33 responding codes): `0xC0` = total usage hours
+  (10250, live), `0xC8` = 18 (matches FW), and `0xAC`/`0xAE`/`0xC6`/`0xDF`
+  hold static values (54012 / 35960 / 111 / 513) that did not change over
+  6 minutes; none equals or scales to a panel-protect counter.
+- While Gaming Intelligence is running it polls `00110` and `00;30` about
+  every 2 s; some of its replies carry the reply verb `6b` instead of `5b`
+  (e.g. `6b00;30000`).
+
+### 5.2 OSD-only telemetry
+
+The monitor's OSD "OLED Panel Info" shows the panel-protect run count
+(observed: `3140`) and time since last run (observed: `0h 10m`). Neither
+value is exposed over DDC/CI or USB HID on this model/firmware — exhaustive
+GET-only probing of all three channels found no matching register. They are
+internal NVRAM values rendered by the OSD only. The only related values the
+app can read are total usage hours (VCP `0xC0`) and the OLED protection
+settings listed above.
+
 ## 6. Safety constraints
 
 - Only the allow-listed Panel Protect command (`00;10` = `001`) is sent; no other

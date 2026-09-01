@@ -85,9 +85,39 @@ public sealed class MonitorSliderViewModelTests
             OledSupportLevel supportLevel) => false;
     }
 
+    [Fact]
+    public async Task OledStatus_UpdatesRefreshRateFromMonitor()
+    {
+        var oledService = new FakeOledCareService
+        {
+            Status = new OledCareStatus(
+                OledSupportLevel.Verified,
+                OledConnectionState.Ready,
+                new OledPanelInfo(1, 100),
+                "ready",
+                240)
+        };
+        var monitor = CreateMonitor(360.0);
+        var viewModel = new MonitorSliderViewModel(
+            monitor,
+            50,
+            _ => { },
+            oledService,
+            new RejectingDialogService());
+
+        await WaitUntilAsync(() => viewModel.RefreshRateText == "240 Hz");
+
+        Assert.Equal(240.0, monitor.RefreshRateHz);
+    }
+
     private sealed class FakeOledCareService : IOledCareService
     {
         public int StartCount { get; private set; }
+        public OledCareStatus Status { get; set; } = new(
+            OledSupportLevel.Verified,
+            OledConnectionState.Ready,
+            new OledPanelInfo(1, 100),
+            "ready");
 
         public OledSupportLevel GetSupportLevel(MonitorInfo monitor) =>
             OledSupportLevel.Verified;
@@ -95,11 +125,7 @@ public sealed class MonitorSliderViewModelTests
         public Task<OledCareStatus> GetStatusAsync(
             MonitorInfo monitor,
             CancellationToken cancellationToken = default) =>
-            Task.FromResult(new OledCareStatus(
-                OledSupportLevel.Verified,
-                OledConnectionState.Ready,
-                new OledPanelInfo(1, 100),
-                "ready"));
+            Task.FromResult(Status);
 
         public Task<PixelRefreshResult> StartPixelRefreshAsync(
             MonitorInfo monitor,

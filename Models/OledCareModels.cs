@@ -24,7 +24,8 @@ public sealed record OledCareStatus(
     OledSupportLevel SupportLevel,
     OledConnectionState ConnectionState,
     OledPanelInfo? PanelInfo,
-    string Message)
+    string Message,
+    int? RefreshRateHz = null)
 {
     public bool CanRunPixelRefresh =>
         SupportLevel != OledSupportLevel.Unsupported &&

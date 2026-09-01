@@ -11,7 +11,8 @@ internal sealed record OledMonitorProfile(
     string PixelShiftCode,
     string PanelProtectCode,
     string ProtectNoticeCode,
-    string PixelRefreshValue);
+    string PixelRefreshValue,
+    string RefreshRateCode);
 
 internal static class OledCompatibilityRegistry
 {
@@ -24,6 +25,7 @@ internal static class OledCompatibilityRegistry
     internal const string PixelShiftCode = "00;00";
     internal const string PanelProtectCode = "00;10";
     internal const string ProtectNoticeCode = "00;90";
+    internal const string RefreshRateCode = "00170";
 
     private static readonly OledMonitorProfile[] Profiles =
     [
@@ -36,7 +38,8 @@ internal static class OledCompatibilityRegistry
             PixelShiftCode,
             PanelProtectCode,
             ProtectNoticeCode,
-            "001")
+            "001",
+            RefreshRateCode)
     ];
 
     public static OledMonitorProfile? Find(MonitorInfo monitor)
@@ -68,6 +71,7 @@ internal static class OledCompatibilityRegistry
             PixelShiftCode,
             PanelProtectCode,
             ProtectNoticeCode,
-            "001");
+            "001",
+            RefreshRateCode);
     }
 }

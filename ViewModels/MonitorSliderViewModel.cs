@@ -160,6 +160,13 @@ public class MonitorSliderViewModel : ViewModelBase
     private void ApplyOledStatus(OledCareStatus status)
     {
         _oledStatus = status;
+
+        if (status.RefreshRateHz is int refreshRateHz)
+        {
+            _monitor.RefreshRateHz = refreshRateHz;
+            OnPropertyChanged(nameof(RefreshRateText));
+            OnPropertyChanged(nameof(HasRefreshRate));
+        }
         if (status.PanelInfo is OledPanelInfo panelInfo &&
             panelInfo.PanelProtect.HasValue)
         {

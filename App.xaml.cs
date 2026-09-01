@@ -104,9 +104,19 @@ public partial class App : System.Windows.Application
             return;
 
         if (_mainWindow.IsVisible)
+        {
             _mainWindow.Hide();
-        else
-            _mainWindow.ShowNearTray(System.Windows.Forms.Cursor.Position);
+            return;
+        }
+
+        _mainWindow.ShowNearTray(System.Windows.Forms.Cursor.Position);
+
+        if (_mainWindow.DataContext is MainWindowViewModel viewModel)
+        {
+            Dispatcher.InvokeAsync(
+                () => viewModel.RefreshCommand.Execute(null),
+                DispatcherPriority.Background);
+        }
     }
 
     private static System.Drawing.Point GetInitialTrayPoint()

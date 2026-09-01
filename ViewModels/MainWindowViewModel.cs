@@ -76,6 +76,8 @@ public class MainWindowViewModel : ViewModelBase
 
             string? primaryDisplayName = System.Windows.Forms.Screen.PrimaryScreen?.DeviceName;
 
+            var monitorVms = new List<MonitorSliderViewModel>();
+
             foreach (var monitor in monitors)
             {
                 var initialBrightness = _displayService.GetBrightness(monitor)
@@ -95,6 +97,12 @@ public class MainWindowViewModel : ViewModelBase
                     primaryDisplayName,
                     StringComparison.OrdinalIgnoreCase);
 
+                monitorVms.Add(vm);
+            }
+
+            foreach (var vm in monitorVms.Where(monitor => monitor.IsPrimary)
+                .Concat(monitorVms.Where(monitor => !monitor.IsPrimary)))
+            {
                 vm.PropertyChanged += Monitor_PropertyChanged;
                 Monitors.Add(vm);
             }

@@ -4,6 +4,11 @@ namespace DisplayBrightness.Services;
 
 public sealed class OledCareService : IOledCareService
 {
+    // On-device routine runs ~6-7 minutes after the command is sent
+    // (observed on the 271QRX; MSI documents only "several minutes").
+    public static readonly TimeSpan PanelProtectRoutineDuration =
+        TimeSpan.FromMinutes(7);
+
     private readonly IMsiHidTransport _transport;
     private readonly Func<MonitorInfo, int?> _usageHoursReader;
 

@@ -52,7 +52,7 @@ public sealed class MonitorSliderViewModelTests
         Assert.Equal("100", viewModel.OledStatusNumberText);
         Assert.Equal(" total panel hours", viewModel.OledStatusSuffixText);
         Assert.Equal(
-            "Just now · Panel Protect started",
+            "Running · about 7m left · Panel Protect",
             viewModel.LastPanelProtectExplanationText);
         viewModel.Dispose();
     }
@@ -151,9 +151,9 @@ public sealed class MonitorSliderViewModelTests
         await WaitUntilAsync(() => oledService.StartCount == 1);
 
         Assert.Equal(0, saveCount);
-        Assert.Equal("30m", viewModel.LastPanelProtectValueText);
+        Assert.Equal("23m", viewModel.LastPanelProtectValueText);
         Assert.Equal(
-            " ago · Panel Protect started",
+            " ago · Panel Protect completed",
             viewModel.LastPanelProtectExplanationText);
         viewModel.Dispose();
     }
@@ -188,11 +188,14 @@ public sealed class MonitorSliderViewModelTests
 
     [Theory]
     [InlineData(null, "Not tracked yet · Panel Protect")]
-    [InlineData(-5, "Just now · Panel Protect started")]
-    [InlineData(1, "1m ago · Panel Protect started")]
-    [InlineData(59, "59m ago · Panel Protect started")]
-    [InlineData(60, "1h 0m ago · Panel Protect started")]
-    [InlineData(130, "2h 10m ago · Panel Protect started")]
+    [InlineData(-5, "Running · about 7m left · Panel Protect")]
+    [InlineData(1, "Running · about 6m left · Panel Protect")]
+    [InlineData(6, "Running · about 1m left · Panel Protect")]
+    [InlineData(7, "Just now · Panel Protect completed")]
+    [InlineData(8, "1m ago · Panel Protect completed")]
+    [InlineData(59, "52m ago · Panel Protect completed")]
+    [InlineData(60, "53m ago · Panel Protect completed")]
+    [InlineData(130, "2h 3m ago · Panel Protect completed")]
     public void LastPanelProtectText_FormatsElapsedWallTime(
         int? elapsedMinutes,
         string expected)
@@ -212,8 +215,8 @@ public sealed class MonitorSliderViewModelTests
     }
 
     [Theory]
-    [InlineData(100, 101, 180, "1 panel hour ago · Panel Protect started")]
-    [InlineData(100, 102, 130, "2h 10m ago · Panel Protect started")]
+    [InlineData(100, 101, 180, "1 panel hour ago · Panel Protect completed")]
+    [InlineData(100, 102, 130, "2h 3m ago · Panel Protect completed")]
     public void LastPanelProtectText_ChoosesMonitorOrWallClockElapsedTime(
         int startedAtHours,
         int currentHours,
@@ -255,9 +258,9 @@ public sealed class MonitorSliderViewModelTests
             timeProvider: new FixedTimeProvider(now));
         await WaitUntilAsync(() => viewModel.CanRunPixelRefresh);
 
-        Assert.Equal("2h 10m", viewModel.LastPanelProtectValueText);
+        Assert.Equal("2h 3m", viewModel.LastPanelProtectValueText);
         Assert.Equal(
-            " ago · Panel Protect started",
+            " ago · Panel Protect completed",
             viewModel.LastPanelProtectExplanationText);
         viewModel.Dispose();
     }

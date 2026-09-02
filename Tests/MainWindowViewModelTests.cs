@@ -94,7 +94,7 @@ public sealed class MainWindowViewModelTests
             timeProvider);
 
         Assert.EndsWith(
-            "Panel Protect started",
+            "Panel Protect completed",
             viewModel.Monitors.Single().LastPanelProtectExplanationText);
 
         timeProvider.Advance(TimeSpan.FromMinutes(1));
@@ -102,7 +102,7 @@ public sealed class MainWindowViewModelTests
 
         Assert.Equal(2, display.EnumerationCount);
         Assert.EndsWith(
-            "Panel Protect started",
+            "Panel Protect completed",
             viewModel.Monitors.Single().LastPanelProtectExplanationText);
         viewModel.Monitors.Single().Dispose();
     }

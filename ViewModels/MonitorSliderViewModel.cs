@@ -339,9 +339,22 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
                 "Not tracked yet · Panel Protect");
 
         TimeSpan elapsed = now - history.LastStartedAtUtc;
-        if (elapsed < TimeSpan.FromMinutes(1))
+        if (elapsed < OledCareService.PanelProtectRoutineDuration)
+        {
+            TimeSpan running = elapsed < TimeSpan.Zero ? TimeSpan.Zero : elapsed;
+            int minutesLeft = (int)Math.Ceiling(
+                (OledCareService.PanelProtectRoutineDuration - running)
+                    .TotalMinutes);
+            return new(
+                string.Empty,
+                $"Running · about {minutesLeft}m left · Panel Protect");
+        }
+
+        TimeSpan sinceCompletion =
+            elapsed - OledCareService.PanelProtectRoutineDuration;
+        if (sinceCompletion < TimeSpan.FromMinutes(1))
             return new(string.Empty,
-                "Just now · Panel Protect started");
+                "Just now · Panel Protect completed");
 
         if (currentTotalUsageHours is int currentHours &&
             history.TotalUsageHoursAtStart is int startedAtHours &&
@@ -349,7 +362,7 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
         {
             int panelHoursElapsed = currentHours - startedAtHours;
             double clockDifference = Math.Abs(
-                elapsed.TotalHours - panelHoursElapsed);
+                sinceCompletion.TotalHours - panelHoursElapsed);
             if (clockDifference > 1)
             {
                 string unit = panelHoursElapsed == 1
@@ -357,23 +370,23 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
                     : "panel hours";
                 return new(
                     $"{panelHoursElapsed:N0} {unit}",
-                    " ago · Panel Protect started");
+                    " ago · Panel Protect completed");
             }
         }
 
-        long totalMinutes = (long)Math.Floor(elapsed.TotalMinutes);
+        long totalMinutes = (long)Math.Floor(sinceCompletion.TotalMinutes);
         if (totalMinutes < 60)
         {
             return new(
                 $"{totalMinutes}m",
-                " ago · Panel Protect started");
+                " ago · Panel Protect completed");
         }
 
         long hours = totalMinutes / 60;
         long minutes = totalMinutes % 60;
         return new(
             $"{hours}h {minutes}m",
-            " ago · Panel Protect started");
+            " ago · Panel Protect completed");
     }
 
     private void UpdateLastPanelProtectText()

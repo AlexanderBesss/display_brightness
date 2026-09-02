@@ -42,6 +42,38 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public void TrayWheel_UsesPrimaryMonitorFromCurrentMonitorList()
+    {
+        string stalePrimaryDisplayName =
+            System.Windows.Forms.Screen.PrimaryScreen?.DeviceName
+            ?? @"\\.\DISPLAY1";
+        var staleMonitor = CreateMonitor(
+            @"MONITOR\OLD0001\instance",
+            stalePrimaryDisplayName,
+            "Disconnected display");
+        var currentPrimaryMonitor = CreateMonitor(
+            @"MONITOR\NEW0001\instance",
+            @"\\.\DISPLAY-CURRENT",
+            "Current primary display");
+        var display = new RecordingDisplayService(
+            staleMonitor,
+            currentPrimaryMonitor);
+        var viewModel = new MainWindowViewModel(
+            display,
+            new FakeStorageService(),
+            new UnsupportedOledCareService(),
+            new RejectingDialogService());
+
+        foreach (MonitorSliderViewModel monitor in viewModel.Monitors)
+            monitor.IsPrimary = monitor.DisplayName == currentPrimaryMonitor.DisplayName;
+
+        bool adjusted = viewModel.AdjustPrimaryBrightness(2);
+
+        Assert.True(adjusted);
+        Assert.Equal(currentPrimaryMonitor.DevicePath, display.LastAdjustedDevicePath);
+    }
+
+    [Fact]
     public async Task OledHistory_ReappearsAfterMonitorReload()
     {
         var now = new DateTimeOffset(2026, 9, 1, 9, 15, 0, TimeSpan.Zero);
@@ -70,6 +102,36 @@ public sealed class MainWindowViewModelTests
         Assert.EndsWith(
             "Panel Protect started",
             viewModel.Monitors.Single().LastPanelProtectExplanationText);
+        viewModel.Monitors.Single().Dispose();
+    }
+
+    [Fact]
+    public async Task OledNotification_ReappearsAfterMonitorReload()
+    {
+        var now = new DateTimeOffset(2026, 9, 1, 17, 30, 0, TimeSpan.Zero);
+        var timeProvider = new AdjustableTimeProvider(now);
+        var storage = new FakeStorageService();
+        storage.OledNotifications[@"MONITOR\MSI3CD7\instance"] =
+            new OledPanelProtectNotification(
+                OledPanelProtectEventType.ShortTime,
+                now - TimeSpan.FromMinutes(5),
+                105);
+        var display = new FakeDisplayService(oled: true);
+        var viewModel = new MainWindowViewModel(
+            display,
+            storage,
+            new ReadyOledCareService(),
+            new RejectingDialogService(),
+            timeProvider);
+
+        Assert.True(viewModel.Monitors.Single()
+            .HasPendingPanelProtectNotification);
+
+        timeProvider.Advance(TimeSpan.FromMinutes(1));
+        await viewModel.RefreshIfStaleAsync();
+
+        Assert.True(viewModel.Monitors.Single()
+            .HasPendingPanelProtectNotification);
         viewModel.Monitors.Single().Dispose();
     }
 
@@ -135,12 +197,42 @@ public sealed class MainWindowViewModelTests
         }
     }
 
+    private sealed class RecordingDisplayService(params MonitorInfo[] monitors)
+        : IDisplayService
+    {
+        public string? LastAdjustedDevicePath { get; private set; }
+
+        public List<MonitorInfo> GetExternalMonitors() => [.. monitors];
+
+        public int? GetBrightness(MonitorInfo monitor) => 50;
+
+        public bool SetBrightness(MonitorInfo monitor, int brightness)
+        {
+            LastAdjustedDevicePath = monitor.DevicePath;
+            return true;
+        }
+    }
+
+    private static MonitorInfo CreateMonitor(
+        string devicePath,
+        string displayName,
+        string friendlyName) => new()
+        {
+            DevicePath = devicePath,
+            DisplayName = displayName,
+            FriendlyName = friendlyName,
+            ModelName = devicePath.Split('\\')[1]
+        };
+
     private sealed class FakeStorageService : IStorageService
     {
         public Dictionary<string, int> Settings { get; } =
             new(StringComparer.OrdinalIgnoreCase);
         public Dictionary<string, OledPanelProtectHistory> OledHistory { get; } =
             new(StringComparer.OrdinalIgnoreCase);
+        public Dictionary<string, OledPanelProtectNotification>
+            OledNotifications { get; } =
+                new(StringComparer.OrdinalIgnoreCase);
         public int SaveCount { get; private set; }
         public bool StartupWriteSucceeds { get; init; } = true;
 
@@ -165,6 +257,18 @@ public sealed class MainWindowViewModelTests
             OledHistory.Clear();
             foreach (var (key, value) in history)
                 OledHistory[key] = value;
+        }
+
+        public Dictionary<string, OledPanelProtectNotification>
+            LoadOledPanelProtectNotifications() =>
+            new(OledNotifications, StringComparer.OrdinalIgnoreCase);
+
+        public void SaveOledPanelProtectNotifications(
+            Dictionary<string, OledPanelProtectNotification> notifications)
+        {
+            OledNotifications.Clear();
+            foreach (var (key, value) in notifications)
+                OledNotifications[key] = value;
         }
 
         public bool GetStartOnStartup() => false;

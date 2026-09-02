@@ -62,6 +62,33 @@ public sealed class OledCareServiceTests
         Assert.Equal(0, transport.NoAckSetCount);
     }
 
+    [Theory]
+    [InlineData("000", OledPanelProtectEventType.None, false)]
+    [InlineData("001", OledPanelProtectEventType.ShortTime, true)]
+    [InlineData("00=", OledPanelProtectEventType.ShortTimeWithLater, true)]
+    public async Task GetPanelProtectEvent_DecodesScalerEvent(
+        string rawValue,
+        OledPanelProtectEventType expectedType,
+        bool requiresAttention)
+    {
+        var transport = new FakeTransport
+        {
+            ScalerEventResult = HidOperationResult.Ok(rawValue)
+        };
+        var service = new OledCareService(transport, _ => null);
+
+        OledPanelProtectEvent? panelEvent =
+            await service.GetPanelProtectEventAsync(CreateMsiMonitor());
+
+        Assert.NotNull(panelEvent);
+        Assert.Equal(expectedType, panelEvent.Type);
+        Assert.Equal(requiresAttention, panelEvent.RequiresAttention);
+        Assert.Equal(1, transport.ScalerEventGetCount);
+        Assert.Equal(
+            OledCompatibilityRegistry.PanelProtectEventCode,
+            transport.LastScalerEventCode);
+    }
+
     [Fact]
     public async Task GetStatus_ReadsRefreshRateAndResolvesMod256Wrap()
     {
@@ -192,14 +219,18 @@ public sealed class OledCareServiceTests
         public int GetCount { get; private set; }
         public int SetCount { get; private set; }
         public int NoAckSetCount { get; private set; }
+        public int ScalerEventGetCount { get; private set; }
         public string? LastGetCode { get; private set; }
         public string? LastSetCode { get; private set; }
         public string? LastSetValue { get; private set; }
         public string? LastNoAckSetCode { get; private set; }
         public string? LastNoAckSetValue { get; private set; }
+        public string? LastScalerEventCode { get; private set; }
         public List<string> GetCodes { get; } = new();
         public HidOperationResult GetResult { get; set; } = HidOperationResult.Ok("001");
         public HidOperationResult SetResult { get; set; } = HidOperationResult.Ok();
+        public HidOperationResult ScalerEventResult { get; set; } =
+            HidOperationResult.Ok("000");
         public bool CancelGets { get; set; }
         public Dictionary<string, HidOperationResult>? ResultsByCode { get; set; }
 
@@ -232,6 +263,17 @@ public sealed class OledCareServiceTests
             LastSetCode = featureCode;
             LastSetValue = value;
             return Task.FromResult(SetResult);
+        }
+
+        public Task<HidOperationResult> GetScalerEventAsync(
+            ushort vendorId,
+            ushort[] productIds,
+            string featureCode,
+            CancellationToken cancellationToken)
+        {
+            ScalerEventGetCount++;
+            LastScalerEventCode = featureCode;
+            return Task.FromResult(ScalerEventResult);
         }
 
         public Task<HidOperationResult> SetNoAckAsync(

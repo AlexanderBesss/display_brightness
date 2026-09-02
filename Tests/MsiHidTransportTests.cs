@@ -30,7 +30,24 @@ public sealed class MsiHidTransportTests
     public void GetCommand_UsestheDocumentedFrame()
     {
         Assert.Equal("5800;10\r", MsiProtocol.GetCommand("00;10"));
+        Assert.Equal(
+            "6800;30\r",
+            MsiProtocol.GetScalerEventCommand("00;30"));
         Assert.Equal("5b00;10001\r", MsiProtocol.SetCommand("00;10", "001"));
+    }
+
+    [Theory]
+    [InlineData("6b00;30000", "000")]
+    [InlineData("6b00;3000=", "00=")]
+    public void TryParseScalerEventReply_ExtractsEventPayload(
+        string payload,
+        string expectedValue)
+    {
+        Assert.True(MsiProtocol.TryParseScalerEventReply(
+            payload,
+            "00;30",
+            out string value));
+        Assert.Equal(expectedValue, value);
     }
 
     [Theory]

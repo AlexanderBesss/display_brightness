@@ -18,6 +18,7 @@ public class StorageService : IStorageService
 
     private readonly string _settingsPath;
     private readonly string _oledHistoryPath;
+    private readonly string _oledNotificationPath;
     private readonly object _saveLock = new();
 
     public StorageService()
@@ -26,6 +27,7 @@ public class StorageService : IStorageService
         var appFolder = Path.Combine(appData, AppName);
         _settingsPath = Path.Combine(appFolder, "settings.json");
         _oledHistoryPath = GetOledHistoryPath(AppContext.BaseDirectory);
+        _oledNotificationPath = GetOledNotificationPath(AppContext.BaseDirectory);
 
         try
         {
@@ -48,6 +50,9 @@ public class StorageService : IStorageService
         _oledHistoryPath = Path.Combine(
             Path.GetDirectoryName(settingsPath) ?? string.Empty,
             "oled-care-history.json");
+        _oledNotificationPath = Path.Combine(
+            Path.GetDirectoryName(settingsPath) ?? string.Empty,
+            "oled-care-notifications.json");
         try
         {
             string? directory = Path.GetDirectoryName(settingsPath);
@@ -154,6 +159,81 @@ public class StorageService : IStorageService
         SaveJson(_oledHistoryPath, normalized);
     }
 
+    public Dictionary<string, OledPanelProtectNotification>
+        LoadOledPanelProtectNotifications()
+    {
+        var normalized = CreateOledNotificationDictionary();
+        if (!File.Exists(_oledNotificationPath))
+            return normalized;
+
+        try
+        {
+            string json = File.ReadAllText(_oledNotificationPath);
+            var notifications = JsonSerializer.Deserialize<
+                Dictionary<string, OledPanelProtectNotification>>(
+                    json,
+                    JsonOptions);
+            if (notifications == null)
+                return normalized;
+
+            foreach (var (devicePath, entry) in notifications)
+            {
+                if (string.IsNullOrWhiteSpace(devicePath) ||
+                    entry == null ||
+                    entry.FirstObservedAtUtc == default ||
+                    entry.Type == OledPanelProtectEventType.None ||
+                    !Enum.IsDefined(entry.Type))
+                {
+                    continue;
+                }
+
+                normalized[devicePath] = entry with
+                {
+                    FirstObservedAtUtc =
+                        entry.FirstObservedAtUtc.ToUniversalTime(),
+                    TotalUsageHoursAtObservation =
+                        entry.TotalUsageHoursAtObservation is >= 0
+                            ? entry.TotalUsageHoursAtObservation
+                            : null
+                };
+            }
+
+            return normalized;
+        }
+        catch
+        {
+            return CreateOledNotificationDictionary();
+        }
+    }
+
+    public void SaveOledPanelProtectNotifications(
+        Dictionary<string, OledPanelProtectNotification> notifications)
+    {
+        var normalized = CreateOledNotificationDictionary();
+        foreach (var (devicePath, entry) in notifications)
+        {
+            if (string.IsNullOrWhiteSpace(devicePath) ||
+                entry == null ||
+                entry.FirstObservedAtUtc == default ||
+                entry.Type == OledPanelProtectEventType.None ||
+                !Enum.IsDefined(entry.Type))
+            {
+                continue;
+            }
+
+            normalized[devicePath] = entry with
+            {
+                FirstObservedAtUtc = entry.FirstObservedAtUtc.ToUniversalTime(),
+                TotalUsageHoursAtObservation =
+                    entry.TotalUsageHoursAtObservation is >= 0
+                        ? entry.TotalUsageHoursAtObservation
+                        : null
+            };
+        }
+
+        SaveJson(_oledNotificationPath, normalized);
+    }
+
     public bool GetStartOnStartup()
     {
         try
@@ -225,6 +305,9 @@ public class StorageService : IStorageService
     internal static string GetOledHistoryPath(string executableDirectory) =>
         Path.Combine(executableDirectory, "oled-care-history.json");
 
+    internal static string GetOledNotificationPath(string executableDirectory) =>
+        Path.Combine(executableDirectory, "oled-care-notifications.json");
+
     private void SaveJson<T>(string destinationPath, T value)
     {
         lock (_saveLock)
@@ -266,5 +349,9 @@ public class StorageService : IStorageService
 
     private static Dictionary<string, OledPanelProtectHistory>
         CreateOledHistoryDictionary() =>
+        new(StringComparer.OrdinalIgnoreCase);
+
+    private static Dictionary<string, OledPanelProtectNotification>
+        CreateOledNotificationDictionary() =>
         new(StringComparer.OrdinalIgnoreCase);
 }

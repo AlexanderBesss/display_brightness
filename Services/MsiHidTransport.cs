@@ -60,6 +60,12 @@ internal interface IMsiHidTransport
         string featureCode,
         CancellationToken cancellationToken);
 
+    Task<HidOperationResult> GetScalerEventAsync(
+        ushort vendorId,
+        ushort[] productIds,
+        string featureCode,
+        CancellationToken cancellationToken);
+
     Task<HidOperationResult> SetAsync(
         ushort vendorId,
         ushort[] productIds,
@@ -79,6 +85,8 @@ internal static class MsiProtocol
 {
     public const string GetVerb = "58";
     public const string ReplyVerb = "5b";
+    public const string ScalerEventGetVerb = "68";
+    public const string ScalerEventReplyVerb = "6b";
     public const string AckSuccess = "5600+";
     public const string AckFailure = "5600-";
     public const int FeatureCodeLength = 5;
@@ -86,16 +94,32 @@ internal static class MsiProtocol
     public static string GetCommand(string featureCode) =>
         GetVerb + featureCode + "\r";
 
+    public static string GetScalerEventCommand(string featureCode) =>
+        ScalerEventGetVerb + featureCode + "\r";
+
     public static string SetCommand(string featureCode, string value) =>
         ReplyVerb + featureCode + value + "\r";
 
     public static bool TryParseReply(
         string payload,
         string featureCode,
+        out string value) =>
+        TryParseReply(payload, ReplyVerb, featureCode, out value);
+
+    public static bool TryParseScalerEventReply(
+        string payload,
+        string featureCode,
+        out string value) =>
+        TryParseReply(payload, ScalerEventReplyVerb, featureCode, out value);
+
+    private static bool TryParseReply(
+        string payload,
+        string replyVerb,
+        string featureCode,
         out string value)
     {
         value = string.Empty;
-        string expected = ReplyVerb + featureCode;
+        string expected = replyVerb + featureCode;
         if (!payload.StartsWith(expected, StringComparison.Ordinal))
             return false;
 
@@ -123,6 +147,22 @@ internal sealed class MsiHidTransport : IMsiHidTransport
             isSet: false,
             waitForAck: false,
             featureCode,
+            MsiProtocol.ReplyVerb,
+            cancellationToken);
+
+    public Task<HidOperationResult> GetScalerEventAsync(
+        ushort vendorId,
+        ushort[] productIds,
+        string featureCode,
+        CancellationToken cancellationToken) =>
+        ExecuteAsync(
+            vendorId,
+            productIds,
+            MsiProtocol.GetScalerEventCommand(featureCode),
+            isSet: false,
+            waitForAck: false,
+            featureCode,
+            MsiProtocol.ScalerEventReplyVerb,
             cancellationToken);
 
     public Task<HidOperationResult> SetAsync(
@@ -138,6 +178,7 @@ internal sealed class MsiHidTransport : IMsiHidTransport
             isSet: true,
             waitForAck: true,
             featureCode,
+            MsiProtocol.ReplyVerb,
             cancellationToken);
 
     public Task<HidOperationResult> SetNoAckAsync(
@@ -153,6 +194,7 @@ internal sealed class MsiHidTransport : IMsiHidTransport
             isSet: true,
             waitForAck: false,
             featureCode,
+            MsiProtocol.ReplyVerb,
             cancellationToken);
 
     private static async Task<HidOperationResult> ExecuteAsync(
@@ -162,6 +204,7 @@ internal sealed class MsiHidTransport : IMsiHidTransport
         bool isSet,
         bool waitForAck,
         string featureCode,
+        string replyVerb,
         CancellationToken cancellationToken)
     {
         await DeviceLock.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -178,7 +221,13 @@ internal sealed class MsiHidTransport : IMsiHidTransport
             foreach (string path in paths)
             {
                 HidOperationResult result = await ExecuteForPathAsync(
-                    path, command, isSet, waitForAck, featureCode, cancellationToken)
+                    path,
+                    command,
+                    isSet,
+                    waitForAck,
+                    featureCode,
+                    replyVerb,
+                    cancellationToken)
                     .ConfigureAwait(false);
                 if (result.State == HidOperationState.Busy)
                 {
@@ -208,6 +257,7 @@ internal sealed class MsiHidTransport : IMsiHidTransport
         bool isSet,
         bool waitForAck,
         string featureCode,
+        string replyVerb,
         CancellationToken cancellationToken)
     {
         using SafeFileHandle handle = MsiHidNative.OpenDevice(path);
@@ -263,6 +313,7 @@ internal sealed class MsiHidTransport : IMsiHidTransport
                 capabilities.InputReportLength,
                 isSet,
                 featureCode,
+                replyVerb,
                 timeoutSource.Token).ConfigureAwait(false);
             if (payload == null)
                 return HidOperationResult.TimedOut();
@@ -274,7 +325,17 @@ internal sealed class MsiHidTransport : IMsiHidTransport
             if (isSet)
                 return HidOperationResult.Ok();
 
-            if (!MsiProtocol.TryParseReply(payload, featureCode, out string value))
+            string value;
+            bool parsed = replyVerb == MsiProtocol.ScalerEventReplyVerb
+                ? MsiProtocol.TryParseScalerEventReply(
+                    payload,
+                    featureCode,
+                    out value)
+                : MsiProtocol.TryParseReply(
+                    payload,
+                    featureCode,
+                    out value);
+            if (!parsed)
                 return HidOperationResult.Fail(
                     $"Unexpected reply from the monitor: {payload}.");
 
@@ -298,11 +359,12 @@ internal sealed class MsiHidTransport : IMsiHidTransport
         int inputReportLength,
         bool isSet,
         string featureCode,
+        string replyVerb,
         CancellationToken cancellationToken)
     {
         string expectedReply = isSet
             ? MsiProtocol.AckSuccess
-            : MsiProtocol.ReplyVerb + featureCode;
+            : replyVerb + featureCode;
 
         byte[] report = new byte[inputReportLength];
         while (!cancellationToken.IsCancellationRequested)

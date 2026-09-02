@@ -101,6 +101,32 @@ public sealed class OledCareService : IOledCareService
             cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task<OledPanelProtectEvent?> GetPanelProtectEventAsync(
+        MonitorInfo monitor,
+        CancellationToken cancellationToken = default)
+    {
+        OledMonitorProfile? profile = OledCompatibilityRegistry.Find(monitor);
+        if (profile == null)
+            return null;
+
+        HidOperationResult result = await _transport.GetScalerEventAsync(
+            profile.HidVendorId,
+            profile.HidProductIds,
+            OledCompatibilityRegistry.PanelProtectEventCode,
+            cancellationToken).ConfigureAwait(false);
+        if (result.State != HidOperationState.Success ||
+            !OledValueParser.TryParsePanelProtectEvent(
+                result.Value,
+                out OledPanelProtectEventType eventType))
+        {
+            return null;
+        }
+
+        return new OledPanelProtectEvent(
+            eventType,
+            DescribePanelProtectEvent(eventType));
+    }
+
     // The 00170 register reports the refresh rate mod 256, so a 360 Hz mode
     // reads 104. Pick the candidate (raw + 256k) closest to the OS-reported
     // rate so >255 Hz modes resolve correctly.
@@ -127,6 +153,28 @@ public sealed class OledCareService : IOledCareService
 
         return resolved;
     }
+
+    internal static string DescribePanelProtectEvent(
+        OledPanelProtectEventType eventType) => eventType switch
+    {
+        OledPanelProtectEventType.None => "No Panel Protect notification",
+        OledPanelProtectEventType.ShortTime => "Panel Protect is due",
+        OledPanelProtectEventType.LongTime => "Long Panel Protect is due",
+        OledPanelProtectEventType.ForcedShortTime => "Panel Protect is required",
+        OledPanelProtectEventType.ForcedLongTime => "Long Panel Protect is required",
+        OledPanelProtectEventType.ManualShortTimeWarning => "Panel Protect was not completed",
+        OledPanelProtectEventType.ManualLongTimeWarning => "Long Panel Protect was not completed",
+        OledPanelProtectEventType.AutoShortTimePowerButtonCancel => "Automatic Panel Protect was interrupted",
+        OledPanelProtectEventType.AutoLongTimePowerButtonCancel => "Automatic long Panel Protect was interrupted",
+        OledPanelProtectEventType.ForcedShortTimePowerButtonCancel => "Required Panel Protect was interrupted",
+        OledPanelProtectEventType.ForcedLongTimePowerButtonCancel => "Required long Panel Protect was interrupted",
+        OledPanelProtectEventType.ManualShortTimeFromUi => "Manual Panel Protect requested",
+        OledPanelProtectEventType.ManualLongTimeFromUi => "Manual long Panel Protect requested",
+        OledPanelProtectEventType.ShortTimeWithLater => "Panel Protect is due",
+        OledPanelProtectEventType.AutoShortTimePowerButtonCancelWithLater => "Automatic Panel Protect was interrupted",
+        OledPanelProtectEventType.PanelProtectCancelWithoutLater => "Panel Protect was cancelled",
+        _ => "Panel Protect needs attention"
+    };
 
     public async Task<PixelRefreshResult> StartPixelRefreshAsync(
         MonitorInfo monitor,

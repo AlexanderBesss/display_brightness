@@ -25,14 +25,16 @@ Commands are ASCII strings written into a 64-byte HID output report.
 | Operation | Request frame            | Response frame                     |
 | --------- | ------------------------ | ---------------------------------- |
 | GET       | `58` + code(5) + `CR`    | `5b` + code + value + `CR`         |
+| Scaler event GET | `68` + code(5) + `CR` | `6b` + code + event value + `CR` |
 | SET       | `5b` + code(5) + value(3) + `CR` | `5600+` (ack) or `5600-` (reject) |
 
-- Verbs are 2 ASCII chars: `58` = GET, `5b` = SET, `56` = SET reply.
+- Verbs are 2 ASCII chars: `58` = GET, `68` = scaler event GET,
+  `5b` = SET/normal reply, `6b` = scaler event reply, `56` = SET reply.
 - Feature codes are 5 ASCII chars, e.g. `00;10`.
 - The app prefixes the 64-byte report with report ID `0x01` and zero-pads the
   rest. This framing is live-verified on the target device.
-- The monitor emits unsolicited 1 Hz pushes (e.g. `6b00;30000`, `5b00110000`);
-  responses are matched by the echoed feature code.
+- `6b00;30...` is not an unsolicited variation of a normal reply. It is the
+  response to the dedicated `6800;30` scaler-event poll used by MSI's helper.
 - I/O timeout: 2.5 s.
 
 ### 3.1 Feature codes observed
@@ -42,8 +44,8 @@ Commands are ASCII strings written into a 64-byte HID output report.
 | `00;00` | 0xB00    | Pixel shift (ours reads `002`)           |
 | `00;10` | 0xB10    | Panel protect (ours reads `001`)         |
 | `00;11` | 0xB11    | OLED protection related (ours reads `001`)|
-| `00;30` | 0xB30    | Protection setting (ours reads `000`)    |
-| `00;90` | 0xB90    | Protect notice (ours reads `001`)        |
+| `00;30` | 0xB30    | Panel Protect scaler event (normal GET reads `000`) |
+| `00;90` | 0xB90    | Protect notice (`000` Auto, `001` longer interval) |
 
 0xB10/0xB11 are documented as "OLED protection related" flags (factory value 1)
 in the 491CQP feature code docs.
@@ -72,6 +74,29 @@ clean write (no ack wait). See `SetNoAckAsync` in
   `SendPanelProtectCommand`; the ShortTime/LongTime buttons (4949/4950) route
   through `MonitorMicroKeyDetector.exe` — a different UI context, not a second
   HID command.
+
+### 4.2 Panel Protect notification event
+
+`MonitorMicroKeyDetector.exe` continuously polls the monitor with
+`6800;30` + `CR`. The reply has the form `6b00;30xxE`, where the final byte
+encodes `OLEDCareEventType` as `E - ASCII('0')`. Values above 9 therefore use
+ASCII punctuation: for example event 13 is `=` (`0x30 + 13`). Important values:
+
+| Event | Meaning |
+| ----- | ------- |
+| 0 | No notification at this instant |
+| 1 / 13 | Short Panel Protect due (13 offers Later) |
+| 2 | Long Panel Protect due |
+| 3 / 4 | Forced short / long Panel Protect |
+| 5–10, 14–15 | Warning, interrupted, cancelled, or deferred protect |
+| 11 / 12 | Manual short / long request from MSI's UI |
+
+MSI polls this channel about once per second and launches `OSDPopupHandler.exe`
+when the value is nonzero. A zero is not durable proof that Panel Protect is not
+needed: live point-in-time reads remained zero after five additional VCP `0xC0`
+usage hours. The app therefore polls while running and latches any actionable
+event in `oled-care-notifications.json`. The indicator remains visible until a
+Panel Protect command is successfully started from this app.
 
 ## 5. Long-command blob (feature report 0x11, 257 bytes)
 
@@ -113,9 +138,9 @@ trigger in the blob:
   (10250, live), `0xC8` = 18 (matches FW), and `0xAC`/`0xAE`/`0xC6`/`0xDF`
   hold static values (54012 / 35960 / 111 / 513) that did not change over
   6 minutes; none equals or scales to a panel-protect counter.
-- While Gaming Intelligence is running it polls `00110` and `00;30` about
-  every 2 s; some of its replies carry the reply verb `6b` instead of `5b`
-  (e.g. `6b00;30000`).
+- Gaming Intelligence's helper reads the UART version at startup and then
+  polls `6800;30` about once per second. Live reads return `6b00;30000` while
+  no notification is being announced.
 
 ### 5.2 OSD-only telemetry
 
@@ -139,12 +164,19 @@ repeating the HID status queries. It is still app-launched history and cannot
 detect refreshes started from the OSD or other software. The history is stored in
 `oled-care-history.json` next to the application executable.
 
+Separately, the app persists scaler notifications it actually observes in
+`oled-care-notifications.json`. This detects monitor requests while the app is
+running, but cannot reconstruct a notification missed while the app was closed
+or confirm that an OSD/standby-initiated refresh later completed.
+
 ## 6. Safety constraints
 
 - Only the allow-listed Panel Protect command (`00;10` = `001`) is sent; no other
   write is issued by the app.
 - Avoid dangerous registers `0x960` and `0x40A`.
 - User confirmation dialog before each refresh.
+- The continuous `6800;30` notification poll is GET-only and never acknowledges,
+  cancels, defers, or executes a monitor event.
 - No scheduling or inferred monitor history; only successful commands launched
   by this app are recorded. Unsupported monitors get no HID traffic at all.
 

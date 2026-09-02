@@ -14,6 +14,11 @@ public interface IOledCareService
         MonitorInfo monitor,
         CancellationToken cancellationToken = default);
 
+    Task<OledPanelProtectEvent?> GetPanelProtectEventAsync(
+        MonitorInfo monitor,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<OledPanelProtectEvent?>(null);
+
     Task<PixelRefreshResult> StartPixelRefreshAsync(
         MonitorInfo monitor,
         CancellationToken cancellationToken = default);

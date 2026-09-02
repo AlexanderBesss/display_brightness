@@ -20,6 +20,8 @@ public class MainWindowViewModel : ViewModelBase
         new(StringComparer.OrdinalIgnoreCase);
     private Dictionary<string, OledPanelProtectHistory> _oledPanelProtectHistory =
         new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, OledPanelProtectNotification>
+        _oledPanelProtectNotifications = new(StringComparer.OrdinalIgnoreCase);
     private DateTimeOffset _lastAutomaticRefreshAtUtc;
     private bool _isRefreshRunning;
 
@@ -172,14 +174,12 @@ public class MainWindowViewModel : ViewModelBase
         if (Monitors.Count == 0)
             return null;
 
-        string? primaryDisplayName = System.Windows.Forms.Screen.PrimaryScreen?.DeviceName;
-        MonitorSliderViewModel? target = Monitors.FirstOrDefault(monitor =>
-            string.Equals(
-                monitor.DisplayName,
-                primaryDisplayName,
-                StringComparison.OrdinalIgnoreCase));
-
-        return target ?? Monitors[0];
+        // Use the primary designation captured with the current monitor list.
+        // Querying Screen.PrimaryScreen again can briefly return the previous
+        // primary display after a monitor is disconnected, causing tray-wheel
+        // input to target a monitor that is no longer available.
+        return Monitors.FirstOrDefault(monitor => monitor.IsPrimary)
+            ?? Monitors[0];
     }
 
     private void Monitor_PropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -234,6 +234,9 @@ public class MainWindowViewModel : ViewModelBase
         Dictionary<string, int> savedSettings = _storageService.LoadSettings();
         Dictionary<string, OledPanelProtectHistory> oledPanelProtectHistory =
             _storageService.LoadOledPanelProtectHistory();
+        Dictionary<string, OledPanelProtectNotification>
+            oledPanelProtectNotifications =
+                _storageService.LoadOledPanelProtectNotifications();
 
         string? primaryDisplayName =
             System.Windows.Forms.Screen.PrimaryScreen?.DeviceName;
@@ -251,18 +254,24 @@ public class MainWindowViewModel : ViewModelBase
                             ? saved
                             : 50);
 
+                oledPanelProtectHistory.TryGetValue(
+                    monitor.DevicePath,
+                    out OledPanelProtectHistory? history);
+                oledPanelProtectNotifications.TryGetValue(
+                    monitor.DevicePath,
+                    out OledPanelProtectNotification? notification);
+
                 var vm = new MonitorSliderViewModel(
                     monitor,
                     initialBrightness,
                     brightness => CommitBrightness(monitor, brightness),
                     _oledCareService,
                     _dialogService,
-                    oledPanelProtectHistory.TryGetValue(
-                        monitor.DevicePath,
-                        out OledPanelProtectHistory? history)
-                        ? history
-                        : null,
-                    entry => SaveOledPanelProtectHistory(monitor, entry));
+                    history,
+                    entry => SaveOledPanelProtectHistory(monitor, entry),
+                    panelProtectNotification: notification,
+                    savePanelProtectNotification: entry =>
+                        SaveOledPanelProtectNotification(monitor, entry));
 
                 vm.IsPrimary = string.Equals(
                     monitor.DisplayName,
@@ -280,6 +289,7 @@ public class MainWindowViewModel : ViewModelBase
 
         _savedSettings = savedSettings;
         _oledPanelProtectHistory = oledPanelProtectHistory;
+        _oledPanelProtectNotifications = oledPanelProtectNotifications;
         ClearMonitors();
 
         foreach (MonitorSliderViewModel vm in
@@ -302,6 +312,22 @@ public class MainWindowViewModel : ViewModelBase
 
         _oledPanelProtectHistory[monitor.DevicePath] = history;
         _storageService.SaveOledPanelProtectHistory(_oledPanelProtectHistory);
+    }
+
+    private void SaveOledPanelProtectNotification(
+        MonitorInfo monitor,
+        OledPanelProtectNotification? notification)
+    {
+        if (string.IsNullOrWhiteSpace(monitor.DevicePath))
+            return;
+
+        if (notification == null)
+            _oledPanelProtectNotifications.Remove(monitor.DevicePath);
+        else
+            _oledPanelProtectNotifications[monitor.DevicePath] = notification;
+
+        _storageService.SaveOledPanelProtectNotifications(
+            _oledPanelProtectNotifications);
     }
 
     private sealed record MonitorReading(MonitorInfo Monitor, int? Brightness);

@@ -17,6 +17,8 @@ the .NET 8 Desktop Runtime (x64).
 - Persistent brightness settings per monitor
 - Standalone MSI OLED Care status, user-initiated Panel Protect support, and
   app-tracked time since the last successful Panel Protect launch
+- Continuous MSI scaler-event monitoring with a persisted Panel Protect-needed
+  indicator in the monitor list
 - Optional startup with Windows
 
 ## Requirements
@@ -30,7 +32,8 @@ MSI OLED Care currently has a verified compatibility profile for the MPG 271QRX
 QD-OLED (`MSI3CD7`). Other detected MSI OLED models are clearly marked
 Experimental and use only the allow-listed Panel Protect command. The app does
 not schedule refreshes or infer refresh history; when the monitor does not return
-OLED Panel Info, it displays `Status unavailable`.
+OLED Panel Info, it displays `Status unavailable`. A captured Panel Protect
+notification is latched locally until Panel Protect is started from this app.
 
 ## Build
 

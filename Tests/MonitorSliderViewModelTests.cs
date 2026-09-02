@@ -58,6 +58,73 @@ public sealed class MonitorSliderViewModelTests
     }
 
     [Fact]
+    public async Task PanelProtectEvent_IsLatchedAndPersisted()
+    {
+        var now = new DateTimeOffset(2026, 9, 1, 17, 30, 0, TimeSpan.Zero);
+        var oledService = new FakeOledCareService
+        {
+            PanelProtectEvent = new OledPanelProtectEvent(
+                OledPanelProtectEventType.ShortTimeWithLater,
+                "Panel Protect is due")
+        };
+        OledPanelProtectNotification? savedNotification = null;
+        var viewModel = new MonitorSliderViewModel(
+            CreateMonitor(),
+            50,
+            _ => true,
+            oledService,
+            new RejectingDialogService(),
+            timeProvider: new FixedTimeProvider(now),
+            savePanelProtectNotification: notification =>
+                savedNotification = notification);
+
+        await WaitUntilAsync(() => viewModel.HasPendingPanelProtectNotification);
+
+        Assert.NotNull(savedNotification);
+        Assert.Equal(
+            OledPanelProtectEventType.ShortTimeWithLater,
+            savedNotification.Type);
+        Assert.Equal(now, savedNotification.FirstObservedAtUtc);
+        Assert.Contains("Panel Protect is due", viewModel.PanelProtectNotificationTooltip);
+
+        oledService.PanelProtectEvent = new OledPanelProtectEvent(
+            OledPanelProtectEventType.None,
+            "No notification");
+        await viewModel.RefreshPanelProtectEventAsync();
+
+        Assert.True(viewModel.HasPendingPanelProtectNotification);
+        viewModel.Dispose();
+    }
+
+    [Fact]
+    public async Task SuccessfulPixelRefresh_ClearsLatchedNotification()
+    {
+        var now = new DateTimeOffset(2026, 9, 1, 17, 30, 0, TimeSpan.Zero);
+        var initialNotification = new OledPanelProtectNotification(
+            OledPanelProtectEventType.ShortTime,
+            now - TimeSpan.FromMinutes(5),
+            100);
+        OledPanelProtectNotification? savedNotification = initialNotification;
+        var viewModel = new MonitorSliderViewModel(
+            CreateMonitor(),
+            50,
+            _ => true,
+            new FakeOledCareService(),
+            new AcceptingDialogService(),
+            timeProvider: new FixedTimeProvider(now),
+            panelProtectNotification: initialNotification,
+            savePanelProtectNotification: notification =>
+                savedNotification = notification);
+        await WaitUntilAsync(() => viewModel.CanRunPixelRefresh);
+
+        viewModel.RunPixelRefreshCommand.Execute(null);
+        await WaitUntilAsync(() => savedNotification == null);
+
+        Assert.False(viewModel.HasPendingPanelProtectNotification);
+        viewModel.Dispose();
+    }
+
+    [Fact]
     public async Task FailedPixelRefresh_DoesNotOverwriteHistory()
     {
         var now = new DateTimeOffset(2026, 9, 1, 9, 15, 0, TimeSpan.Zero);
@@ -235,10 +302,12 @@ public sealed class MonitorSliderViewModelTests
             timeProvider: new FixedTimeProvider(now));
 
         Assert.True(viewModel.IsPanelProtectHistoryTimerRunning);
+        Assert.True(viewModel.IsPanelProtectEventTimerRunning);
 
         viewModel.Dispose();
 
         Assert.False(viewModel.IsPanelProtectHistoryTimerRunning);
+        Assert.False(viewModel.IsPanelProtectEventTimerRunning);
     }
 
     [Theory]
@@ -400,6 +469,8 @@ public sealed class MonitorSliderViewModelTests
         public Exception? StartException { get; set; }
         public int? ReportedTotalUsageHours { get; set; }
         public int UsageHoursReadCount { get; private set; }
+        public OledPanelProtectEvent? PanelProtectEvent { get; set; }
+        public int PanelProtectEventReadCount { get; private set; }
         public OledCareStatus Status { get; set; } = new(
             OledSupportLevel.Verified,
             OledConnectionState.Ready,
@@ -421,6 +492,14 @@ public sealed class MonitorSliderViewModelTests
             UsageHoursReadCount++;
             return Task.FromResult(
                 ReportedTotalUsageHours ?? Status.PanelInfo?.TotalUsageHours);
+        }
+
+        public Task<OledPanelProtectEvent?> GetPanelProtectEventAsync(
+            MonitorInfo monitor,
+            CancellationToken cancellationToken = default)
+        {
+            PanelProtectEventReadCount++;
+            return Task.FromResult(PanelProtectEvent);
         }
 
         public Task<PixelRefreshResult> StartPixelRefreshAsync(

@@ -26,4 +26,20 @@ internal static class OledValueParser
 
         return int.TryParse(value, out result);
     }
+
+    public static bool TryParsePanelProtectEvent(
+        string value,
+        out OledPanelProtectEventType eventType)
+    {
+        eventType = OledPanelProtectEventType.None;
+        if (value.Length != 3 || value[0] != '0' || value[1] != '0')
+            return false;
+
+        int eventCode = value[2] - '0';
+        if (!Enum.IsDefined(typeof(OledPanelProtectEventType), eventCode))
+            return false;
+
+        eventType = (OledPanelProtectEventType)eventCode;
+        return true;
+    }
 }

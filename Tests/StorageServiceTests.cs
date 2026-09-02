@@ -23,6 +23,9 @@ public sealed class StorageServiceTests
         Assert.Equal(
             @"C:\Tools\Brightness\oled-care-history.json",
             StorageService.GetOledHistoryPath(executableDirectory));
+        Assert.Equal(
+            @"C:\Tools\Brightness\oled-care-notifications.json",
+            StorageService.GetOledNotificationPath(executableDirectory));
     }
 
     [Fact]
@@ -101,6 +104,52 @@ public sealed class StorageServiceTests
                 "{ definitely not valid JSON");
 
             Assert.Empty(storage.LoadOledPanelProtectHistory());
+        }
+        finally
+        {
+            Directory.Delete(testDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void OledNotifications_RoundTripAndDiscardInvalidEntries()
+    {
+        string testDirectory = CreateTestDirectory();
+        string settingsPath = Path.Combine(testDirectory, "settings.json");
+        var timestamp = new DateTimeOffset(
+            2026, 9, 1, 17, 30, 0, TimeSpan.FromHours(3));
+
+        try
+        {
+            var storage = new StorageService(settingsPath);
+            storage.SaveOledPanelProtectNotifications(new Dictionary<
+                string,
+                OledPanelProtectNotification>
+            {
+                [@"MONITOR\MSI3CD7\INSTANCE"] = new(
+                    OledPanelProtectEventType.ShortTimeWithLater,
+                    timestamp,
+                    10258),
+                [@"MONITOR\MSI3CD7\NONE"] = new(
+                    OledPanelProtectEventType.None,
+                    timestamp,
+                    10258)
+            });
+
+            Dictionary<string, OledPanelProtectNotification> notifications =
+                storage.LoadOledPanelProtectNotifications();
+
+            OledPanelProtectNotification saved =
+                notifications[@"monitor\msi3cd7\instance"];
+            Assert.Equal(
+                OledPanelProtectEventType.ShortTimeWithLater,
+                saved.Type);
+            Assert.Equal(timestamp.ToUniversalTime(), saved.FirstObservedAtUtc);
+            Assert.Equal(10258, saved.TotalUsageHoursAtObservation);
+            Assert.DoesNotContain(
+                @"monitor\msi3cd7\none",
+                notifications.Keys,
+                StringComparer.OrdinalIgnoreCase);
         }
         finally
         {

@@ -24,6 +24,7 @@ internal static class OledCompatibilityRegistry
     //   0xB00 pixel shift, 0xB10/0xB11 panel protect, 0xB90 protect notice.
     internal const string PixelShiftCode = "00;00";
     internal const string PanelProtectCode = "00;10";
+    internal const string PanelProtectEventCode = "00;30";
     internal const string ProtectNoticeCode = "00;90";
     internal const string RefreshRateCode = "00170";
 

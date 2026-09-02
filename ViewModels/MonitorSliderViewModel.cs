@@ -13,13 +13,19 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
     private readonly IOledCareService _oledCareService;
     private readonly IUserDialogService _dialogService;
     private readonly Action<OledPanelProtectHistory>? _savePanelProtectHistory;
+    private readonly Action<OledPanelProtectNotification?>?
+        _savePanelProtectNotification;
     private readonly TimeProvider _timeProvider;
     private readonly DispatcherTimer? _panelProtectHistoryTimer;
+    private readonly DispatcherTimer? _panelProtectEventTimer;
     private readonly CancellationTokenSource _lifetimeCancellation = new();
     private OledPanelProtectHistory? _panelProtectHistory;
     private int? _currentTotalUsageHours;
     private bool _isUsageHoursRefreshRunning;
+    private bool _isPanelProtectEventRefreshRunning;
     private bool _isDisposed;
+    private OledPanelProtectNotification? _panelProtectNotification;
+    private OledPanelProtectEventType? _ignoredPanelProtectEventTypeUntilClear;
 
     internal string DisplayName { get; }
     public string FriendlyName { get; }
@@ -40,6 +46,16 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
     };
 
     public OledSupportLevel OledSupportLevel { get; }
+
+    public bool HasPendingPanelProtectNotification =>
+        _panelProtectNotification != null;
+
+    public string PanelProtectNotificationTooltip =>
+        _panelProtectNotification is { } notification
+            ? $"{OledCareService.DescribePanelProtectEvent(notification.Type)}. " +
+              $"Detected {notification.FirstObservedAtUtc.ToLocalTime():g}. " +
+              "Run Panel Protect from OLED Care."
+            : string.Empty;
 
     private bool _isOledBusy;
     public bool IsOledBusy
@@ -93,6 +109,8 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
 
     internal bool IsPanelProtectHistoryTimerRunning =>
         _panelProtectHistoryTimer?.IsEnabled == true;
+    internal bool IsPanelProtectEventTimerRunning =>
+        _panelProtectEventTimer?.IsEnabled == true;
 
     public ICommand RunPixelRefreshCommand { get; }
 
@@ -119,7 +137,9 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
         IUserDialogService dialogService,
         OledPanelProtectHistory? panelProtectHistory = null,
         Action<OledPanelProtectHistory>? savePanelProtectHistory = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        OledPanelProtectNotification? panelProtectNotification = null,
+        Action<OledPanelProtectNotification?>? savePanelProtectNotification = null)
     {
         _monitor = monitor;
         DisplayName = monitor.DisplayName;
@@ -132,6 +152,8 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
         _dialogService = dialogService;
         _panelProtectHistory = panelProtectHistory;
         _savePanelProtectHistory = savePanelProtectHistory;
+        _panelProtectNotification = panelProtectNotification;
+        _savePanelProtectNotification = savePanelProtectNotification;
         _timeProvider = timeProvider ?? TimeProvider.System;
         OledSupportLevel = _oledCareService.GetSupportLevel(monitor);
         RunPixelRefreshCommand = new AsyncRelayCommand(
@@ -148,9 +170,20 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
                 Dispatcher.CurrentDispatcher);
             _panelProtectHistoryTimer.Start();
 
+            _panelProtectEventTimer = new DispatcherTimer(
+                TimeSpan.FromSeconds(1),
+                DispatcherPriority.Background,
+                PanelProtectEventTimer_Tick,
+                Dispatcher.CurrentDispatcher);
+            _panelProtectEventTimer.Start();
+
             AsyncHelper.FireAndForget(
                 () => RefreshOledStatusAsync(_lifetimeCancellation.Token),
                 "OLED initial status");
+            AsyncHelper.FireAndForget(
+                () => RefreshPanelProtectEventAsync(
+                    _lifetimeCancellation.Token),
+                "OLED Panel Protect event poll");
         }
     }
 
@@ -224,6 +257,9 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
                 _panelProtectHistory = new OledPanelProtectHistory(
                     _timeProvider.GetUtcNow(),
                     _currentTotalUsageHours);
+                _ignoredPanelProtectEventTypeUntilClear =
+                    _panelProtectNotification?.Type;
+                SetPanelProtectNotification(null);
                 UpdateLastPanelProtectText();
 
                 try
@@ -369,6 +405,84 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
         await RefreshTotalUsageHoursAsync();
     }
 
+    private async void PanelProtectEventTimer_Tick(object? sender, EventArgs e)
+    {
+        await RefreshPanelProtectEventAsync(_lifetimeCancellation.Token);
+    }
+
+    internal async Task RefreshPanelProtectEventAsync(
+        CancellationToken cancellationToken = default)
+    {
+        if (_isDisposed || _isPanelProtectEventRefreshRunning)
+            return;
+
+        _isPanelProtectEventRefreshRunning = true;
+        try
+        {
+            OledPanelProtectEvent? panelEvent =
+                await _oledCareService.GetPanelProtectEventAsync(
+                    _monitor,
+                    cancellationToken);
+            if (!_isDisposed && panelEvent?.RequiresAttention == true)
+            {
+                if (panelEvent.Type == _ignoredPanelProtectEventTypeUntilClear)
+                    return;
+
+                LatchPanelProtectNotification(panelEvent.Type);
+            }
+            else if (panelEvent?.Type == OledPanelProtectEventType.None)
+            {
+                _ignoredPanelProtectEventTypeUntilClear = null;
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch
+        {
+            // A notification poll is advisory. Keep a previously latched
+            // notification and silently retry on the next timer tick.
+        }
+        finally
+        {
+            _isPanelProtectEventRefreshRunning = false;
+        }
+    }
+
+    private void LatchPanelProtectNotification(
+        OledPanelProtectEventType eventType)
+    {
+        if (_panelProtectNotification?.Type == eventType)
+            return;
+
+        DateTimeOffset observedAt = _panelProtectNotification?.FirstObservedAtUtc
+            ?? _timeProvider.GetUtcNow();
+        SetPanelProtectNotification(new OledPanelProtectNotification(
+            eventType,
+            observedAt,
+            _currentTotalUsageHours));
+    }
+
+    private void SetPanelProtectNotification(
+        OledPanelProtectNotification? notification)
+    {
+        if (_panelProtectNotification == notification)
+            return;
+
+        _panelProtectNotification = notification;
+        OnPropertyChanged(nameof(HasPendingPanelProtectNotification));
+        OnPropertyChanged(nameof(PanelProtectNotificationTooltip));
+
+        try
+        {
+            _savePanelProtectNotification?.Invoke(notification);
+        }
+        catch
+        {
+            // Persistence must not interfere with OLED control or the UI.
+        }
+    }
+
     internal async Task RefreshTotalUsageHoursAsync()
     {
         if (_isDisposed ||
@@ -414,6 +528,11 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
         {
             _panelProtectHistoryTimer.Stop();
             _panelProtectHistoryTimer.Tick -= PanelProtectHistoryTimer_Tick;
+        }
+        if (_panelProtectEventTimer != null)
+        {
+            _panelProtectEventTimer.Stop();
+            _panelProtectEventTimer.Tick -= PanelProtectEventTimer_Tick;
         }
         _lifetimeCancellation.Cancel();
         _lifetimeCancellation.Dispose();

@@ -6,13 +6,9 @@ public interface IStorageService
 {
     Dictionary<string, int> LoadSettings();
     void SaveSettings(Dictionary<string, int> settings);
-    Dictionary<string, OledPanelProtectHistory> LoadOledPanelProtectHistory();
-    void SaveOledPanelProtectHistory(
-        Dictionary<string, OledPanelProtectHistory> history);
-    Dictionary<string, OledPanelProtectNotification>
-        LoadOledPanelProtectNotifications();
-    void SaveOledPanelProtectNotifications(
-        Dictionary<string, OledPanelProtectNotification> notifications);
+    Dictionary<string, OledPanelProtectState> LoadOledPanelProtectState();
+    void SaveOledPanelProtectState(
+        Dictionary<string, OledPanelProtectState> state);
     bool GetStartOnStartup();
     bool SetStartOnStartup(bool enabled);
 }

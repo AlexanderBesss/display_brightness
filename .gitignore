@@ -8,7 +8,7 @@ publish/
 [Tt]emp/
 [Tt]est[Rr]esult*
 *.log
-oled-care-history.json
+oled-care-state.json
 .vs/
 .ipynb_checkpoints
 opencode.json

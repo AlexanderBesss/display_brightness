@@ -79,10 +79,12 @@ public sealed class MainWindowViewModelTests
         var now = new DateTimeOffset(2026, 9, 1, 9, 15, 0, TimeSpan.Zero);
         var timeProvider = new AdjustableTimeProvider(now);
         var storage = new FakeStorageService();
-        storage.OledHistory[@"MONITOR\MSI3CD7\instance"] =
-            new OledPanelProtectHistory(
-                now - TimeSpan.FromMinutes(10),
-                100);
+        storage.OledState[@"MONITOR\MSI3CD7\instance"] =
+            new OledPanelProtectState(
+                new OledPanelProtectHistory(
+                    now - TimeSpan.FromMinutes(10),
+                    100),
+                null);
         var display = new FakeDisplayService(oled: true);
         var viewModel = new MainWindowViewModel(
             display,
@@ -111,11 +113,13 @@ public sealed class MainWindowViewModelTests
         var now = new DateTimeOffset(2026, 9, 1, 17, 30, 0, TimeSpan.Zero);
         var timeProvider = new AdjustableTimeProvider(now);
         var storage = new FakeStorageService();
-        storage.OledNotifications[@"MONITOR\MSI3CD7\instance"] =
-            new OledPanelProtectNotification(
-                OledPanelProtectEventType.ShortTime,
-                now - TimeSpan.FromMinutes(5),
-                105);
+        storage.OledState[@"MONITOR\MSI3CD7\instance"] =
+            new OledPanelProtectState(
+                null,
+                new OledPanelProtectNotification(
+                    OledPanelProtectEventType.ShortTime,
+                    now - TimeSpan.FromMinutes(5),
+                    105));
         var display = new FakeDisplayService(oled: true);
         var viewModel = new MainWindowViewModel(
             display,
@@ -228,11 +232,8 @@ public sealed class MainWindowViewModelTests
     {
         public Dictionary<string, int> Settings { get; } =
             new(StringComparer.OrdinalIgnoreCase);
-        public Dictionary<string, OledPanelProtectHistory> OledHistory { get; } =
+        public Dictionary<string, OledPanelProtectState> OledState { get; } =
             new(StringComparer.OrdinalIgnoreCase);
-        public Dictionary<string, OledPanelProtectNotification>
-            OledNotifications { get; } =
-                new(StringComparer.OrdinalIgnoreCase);
         public int SaveCount { get; private set; }
         public bool StartupWriteSucceeds { get; init; } = true;
 
@@ -247,28 +248,16 @@ public sealed class MainWindowViewModelTests
                 Settings[key] = value;
         }
 
-        public Dictionary<string, OledPanelProtectHistory>
-            LoadOledPanelProtectHistory() =>
-            new(OledHistory, StringComparer.OrdinalIgnoreCase);
+        public Dictionary<string, OledPanelProtectState>
+            LoadOledPanelProtectState() =>
+            new(OledState, StringComparer.OrdinalIgnoreCase);
 
-        public void SaveOledPanelProtectHistory(
-            Dictionary<string, OledPanelProtectHistory> history)
+        public void SaveOledPanelProtectState(
+            Dictionary<string, OledPanelProtectState> state)
         {
-            OledHistory.Clear();
-            foreach (var (key, value) in history)
-                OledHistory[key] = value;
-        }
-
-        public Dictionary<string, OledPanelProtectNotification>
-            LoadOledPanelProtectNotifications() =>
-            new(OledNotifications, StringComparer.OrdinalIgnoreCase);
-
-        public void SaveOledPanelProtectNotifications(
-            Dictionary<string, OledPanelProtectNotification> notifications)
-        {
-            OledNotifications.Clear();
-            foreach (var (key, value) in notifications)
-                OledNotifications[key] = value;
+            OledState.Clear();
+            foreach (var (key, value) in state)
+                OledState[key] = value;
         }
 
         public bool GetStartOnStartup() => false;

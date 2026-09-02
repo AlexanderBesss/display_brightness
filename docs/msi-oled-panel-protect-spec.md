@@ -95,8 +95,9 @@ MSI polls this channel about once per second and launches `OSDPopupHandler.exe`
 when the value is nonzero. A zero is not durable proof that Panel Protect is not
 needed: live point-in-time reads remained zero after five additional VCP `0xC0`
 usage hours. The app therefore polls while running and latches any actionable
-event in `oled-care-notifications.json`. The indicator remains visible until a
-Panel Protect command is successfully started from this app.
+event in the `Notification` entry of `oled-care-state.json`. The indicator
+remains visible until a Panel Protect command is successfully started from this
+app.
 
 ## 5. Long-command blob (feature report 0x11, 257 bytes)
 
@@ -161,13 +162,15 @@ authoritative and the UI shows whole panel hours. This avoids counting long
 periods while the monitor was off. While history exists, the app rereads only
 VCP `0xC0` once per minute so the monitor-authoritative value can advance without
 repeating the HID status queries. It is still app-launched history and cannot
-detect refreshes started from the OSD or other software. The history is stored in
-`oled-care-history.json` next to the application executable.
+detect refreshes started from the OSD or other software.
 
-Separately, the app persists scaler notifications it actually observes in
-`oled-care-notifications.json`. This detects monitor requests while the app is
-running, but cannot reconstruct a notification missed while the app was closed
-or confirm that an OSD/standby-initiated refresh later completed.
+The app stores this history and the scaler notifications it actually observes in
+a single `oled-care-state.json` file next to the application executable: one
+entry per monitor holding an optional `History` part (the app-launched panel
+protect run) and an optional `Notification` part (the latched monitor request).
+The notification part detects monitor requests while the app is running, but
+cannot reconstruct a notification missed while the app was closed or confirm
+that an OSD/standby-initiated refresh later completed.
 
 ## 6. Safety constraints
 

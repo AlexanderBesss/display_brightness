@@ -10,6 +10,7 @@ public class StorageService : IStorageService
     private const string LegacyAppName = "DisplayBrightness";
     private const string StartupRegistryPath =
         "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+    private const string OledStateFileName = "oled-care-state.json";
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -17,8 +18,7 @@ public class StorageService : IStorageService
     };
 
     private readonly string _settingsPath;
-    private readonly string _oledHistoryPath;
-    private readonly string _oledNotificationPath;
+    private readonly string _oledStatePath;
     private readonly object _saveLock = new();
 
     public StorageService()
@@ -26,8 +26,8 @@ public class StorageService : IStorageService
         var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
         var appFolder = Path.Combine(appData, AppName);
         _settingsPath = Path.Combine(appFolder, "settings.json");
-        _oledHistoryPath = GetOledHistoryPath(AppContext.BaseDirectory);
-        _oledNotificationPath = GetOledNotificationPath(AppContext.BaseDirectory);
+        string executableDirectory = AppContext.BaseDirectory;
+        _oledStatePath = GetOledCareStatePath(executableDirectory);
 
         try
         {
@@ -47,15 +47,10 @@ public class StorageService : IStorageService
     internal StorageService(string settingsPath)
     {
         _settingsPath = settingsPath;
-        _oledHistoryPath = Path.Combine(
-            Path.GetDirectoryName(settingsPath) ?? string.Empty,
-            "oled-care-history.json");
-        _oledNotificationPath = Path.Combine(
-            Path.GetDirectoryName(settingsPath) ?? string.Empty,
-            "oled-care-notifications.json");
+        string directory = Path.GetDirectoryName(settingsPath) ?? string.Empty;
+        _oledStatePath = Path.Combine(directory, OledStateFileName);
         try
         {
-            string? directory = Path.GetDirectoryName(settingsPath);
             if (!string.IsNullOrEmpty(directory))
                 Directory.CreateDirectory(directory);
         }
@@ -97,141 +92,116 @@ public class StorageService : IStorageService
         SaveJson(_settingsPath, settings);
     }
 
-    public Dictionary<string, OledPanelProtectHistory> LoadOledPanelProtectHistory()
+    public Dictionary<string, OledPanelProtectState> LoadOledPanelProtectState()
     {
-        var normalized = CreateOledHistoryDictionary();
-        if (!File.Exists(_oledHistoryPath))
-            return normalized;
+        if (!File.Exists(_oledStatePath))
+            return CreateOledStateDictionary();
 
         try
         {
-            string json = File.ReadAllText(_oledHistoryPath);
-            var history = JsonSerializer.Deserialize<
-                Dictionary<string, OledPanelProtectHistory>>(json, JsonOptions);
-            if (history == null)
-                return normalized;
-
-            foreach (var (devicePath, entry) in history)
-            {
-                if (string.IsNullOrWhiteSpace(devicePath) ||
-                    entry == null ||
-                    entry.LastStartedAtUtc == default)
-                    continue;
-
-                int? usageHours = entry.TotalUsageHoursAtStart is >= 0
-                    ? entry.TotalUsageHoursAtStart
-                    : null;
-                normalized[devicePath] = entry with
-                {
-                    LastStartedAtUtc = entry.LastStartedAtUtc.ToUniversalTime(),
-                    TotalUsageHoursAtStart = usageHours
-                };
-            }
-
-            return normalized;
-        }
-        catch
-        {
-            return CreateOledHistoryDictionary();
-        }
-    }
-
-    public void SaveOledPanelProtectHistory(
-        Dictionary<string, OledPanelProtectHistory> history)
-    {
-        var normalized = CreateOledHistoryDictionary();
-        foreach (var (devicePath, entry) in history)
-        {
-            if (string.IsNullOrWhiteSpace(devicePath) ||
-                entry == null ||
-                entry.LastStartedAtUtc == default)
-                continue;
-
-            normalized[devicePath] = entry with
-            {
-                LastStartedAtUtc = entry.LastStartedAtUtc.ToUniversalTime(),
-                TotalUsageHoursAtStart = entry.TotalUsageHoursAtStart is >= 0
-                    ? entry.TotalUsageHoursAtStart
-                    : null
-            };
-        }
-
-        SaveJson(_oledHistoryPath, normalized);
-    }
-
-    public Dictionary<string, OledPanelProtectNotification>
-        LoadOledPanelProtectNotifications()
-    {
-        var normalized = CreateOledNotificationDictionary();
-        if (!File.Exists(_oledNotificationPath))
-            return normalized;
-
-        try
-        {
-            string json = File.ReadAllText(_oledNotificationPath);
-            var notifications = JsonSerializer.Deserialize<
-                Dictionary<string, OledPanelProtectNotification>>(
+            string json = File.ReadAllText(_oledStatePath);
+            var loaded = JsonSerializer.Deserialize<
+                Dictionary<string, OledPanelProtectState>>(
                     json,
                     JsonOptions);
-            if (notifications == null)
-                return normalized;
-
-            foreach (var (devicePath, entry) in notifications)
-            {
-                if (string.IsNullOrWhiteSpace(devicePath) ||
-                    entry == null ||
-                    entry.FirstObservedAtUtc == default ||
-                    entry.Type == OledPanelProtectEventType.None ||
-                    !Enum.IsDefined(entry.Type))
-                {
-                    continue;
-                }
-
-                normalized[devicePath] = entry with
-                {
-                    FirstObservedAtUtc =
-                        entry.FirstObservedAtUtc.ToUniversalTime(),
-                    TotalUsageHoursAtObservation =
-                        entry.TotalUsageHoursAtObservation is >= 0
-                            ? entry.TotalUsageHoursAtObservation
-                            : null
-                };
-            }
-
-            return normalized;
+            return NormalizeStateDictionary(loaded);
         }
         catch
         {
-            return CreateOledNotificationDictionary();
+            return CreateOledStateDictionary();
         }
     }
 
-    public void SaveOledPanelProtectNotifications(
-        Dictionary<string, OledPanelProtectNotification> notifications)
+    public void SaveOledPanelProtectState(
+        Dictionary<string, OledPanelProtectState> state)
     {
-        var normalized = CreateOledNotificationDictionary();
-        foreach (var (devicePath, entry) in notifications)
+        var normalized = CreateOledStateDictionary();
+        if (state != null)
         {
-            if (string.IsNullOrWhiteSpace(devicePath) ||
-                entry == null ||
-                entry.FirstObservedAtUtc == default ||
-                entry.Type == OledPanelProtectEventType.None ||
-                !Enum.IsDefined(entry.Type))
+            foreach (var (devicePath, entry) in state)
             {
-                continue;
+                var normalizedEntry = NormalizeState(entry);
+                if (!string.IsNullOrWhiteSpace(devicePath) &&
+                    normalizedEntry != null)
+                {
+                    normalized[devicePath] = normalizedEntry;
+                }
             }
-
-            normalized[devicePath] = entry with
-            {
-                FirstObservedAtUtc = entry.FirstObservedAtUtc.ToUniversalTime(),
-                TotalUsageHoursAtObservation =
-                    entry.TotalUsageHoursAtObservation is >= 0
-                        ? entry.TotalUsageHoursAtObservation
-                        : null
-            };
         }
 
-        SaveJson(_oledNotificationPath, normalized);
+        SaveJson(_oledStatePath, normalized);
+    }
+
+    private static OledPanelProtectState? NormalizeState(
+        OledPanelProtectState? entry)
+    {
+        if (entry == null)
+            return null;
+
+        OledPanelProtectHistory? history = NormalizeHistory(entry.History);
+        OledPanelProtectNotification? notification =
+            NormalizeNotification(entry.Notification);
+        if (history == null && notification == null)
+            return null;
+
+        return new OledPanelProtectState(history, notification);
+    }
+
+    private static OledPanelProtectHistory? NormalizeHistory(
+        OledPanelProtectHistory? entry)
+    {
+        if (entry == null || entry.LastStartedAtUtc == default)
+            return null;
+
+        return entry with
+        {
+            LastStartedAtUtc = entry.LastStartedAtUtc.ToUniversalTime(),
+            TotalUsageHoursAtStart = entry.TotalUsageHoursAtStart is >= 0
+                ? entry.TotalUsageHoursAtStart
+                : null
+        };
+    }
+
+    private static OledPanelProtectNotification? NormalizeNotification(
+        OledPanelProtectNotification? entry)
+    {
+        if (entry == null ||
+            entry.FirstObservedAtUtc == default ||
+            entry.Type == OledPanelProtectEventType.None ||
+            !Enum.IsDefined(entry.Type))
+        {
+            return null;
+        }
+
+        return entry with
+        {
+            FirstObservedAtUtc = entry.FirstObservedAtUtc.ToUniversalTime(),
+            TotalUsageHoursAtObservation =
+                entry.TotalUsageHoursAtObservation is >= 0
+                    ? entry.TotalUsageHoursAtObservation
+                    : null
+        };
+    }
+
+    private static Dictionary<string, OledPanelProtectState>
+        NormalizeStateDictionary(
+            Dictionary<string, OledPanelProtectState>? loaded)
+    {
+        var normalized = CreateOledStateDictionary();
+        if (loaded != null)
+        {
+            foreach (var (devicePath, entry) in loaded)
+            {
+                var normalizedEntry = NormalizeState(entry);
+                if (!string.IsNullOrWhiteSpace(devicePath) &&
+                    normalizedEntry != null)
+                {
+                    normalized[devicePath] = normalizedEntry;
+                }
+            }
+        }
+
+        return normalized;
     }
 
     public bool GetStartOnStartup()
@@ -302,11 +272,8 @@ public class StorageService : IStorageService
     internal static string FormatStartupCommand(string executablePath) =>
         $"\"{executablePath.Trim('\"')}\" --startup";
 
-    internal static string GetOledHistoryPath(string executableDirectory) =>
-        Path.Combine(executableDirectory, "oled-care-history.json");
-
-    internal static string GetOledNotificationPath(string executableDirectory) =>
-        Path.Combine(executableDirectory, "oled-care-notifications.json");
+    internal static string GetOledCareStatePath(string executableDirectory) =>
+        Path.Combine(executableDirectory, OledStateFileName);
 
     private void SaveJson<T>(string destinationPath, T value)
     {
@@ -347,11 +314,7 @@ public class StorageService : IStorageService
     private static Dictionary<string, int> CreateSettingsDictionary() =>
         new(StringComparer.OrdinalIgnoreCase);
 
-    private static Dictionary<string, OledPanelProtectHistory>
-        CreateOledHistoryDictionary() =>
-        new(StringComparer.OrdinalIgnoreCase);
-
-    private static Dictionary<string, OledPanelProtectNotification>
-        CreateOledNotificationDictionary() =>
+    private static Dictionary<string, OledPanelProtectState>
+        CreateOledStateDictionary() =>
         new(StringComparer.OrdinalIgnoreCase);
 }

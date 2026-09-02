@@ -72,3 +72,7 @@ public sealed record OledPanelProtectNotification(
     OledPanelProtectEventType Type,
     DateTimeOffset FirstObservedAtUtc,
     int? TotalUsageHoursAtObservation);
+
+public sealed record OledPanelProtectState(
+    OledPanelProtectHistory? History,
+    OledPanelProtectNotification? Notification);

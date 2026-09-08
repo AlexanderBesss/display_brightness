@@ -49,6 +49,7 @@ internal sealed class NativeTrayIcon : NativeWindow, IDisposable
     public event Action<Point>? LeftClick;
     public event Action? RightClick;
     public event Action<int>? MouseWheel;
+    public event Action? DisplayConfigurationChanged;
 
     public bool IsWheelEnabled
     {
@@ -126,6 +127,8 @@ internal sealed class NativeTrayIcon : NativeWindow, IDisposable
 
     protected override void WndProc(ref Message message)
     {
+        if (IsDisplayConfigurationMessage(message.Msg, message.WParam.ToInt64()))
+            DisplayConfigurationChanged?.Invoke();
         if (message.Msg == TrayCallbackMessage)
         {
             int notification = unchecked((ushort)(long)message.LParam);
@@ -152,6 +155,11 @@ internal sealed class NativeTrayIcon : NativeWindow, IDisposable
 
         base.WndProc(ref message);
     }
+
+    internal static bool IsDisplayConfigurationMessage(int message, long eventCode) =>
+        message == 0x007E || // WM_DISPLAYCHANGE
+        (message == 0x0219 && eventCode is 0x0007 or 0x0018 or 0x8000 or 0x8004) || // WM_DEVICECHANGE
+        (message == 0x0218 && eventCode is 0x0007 or 0x0012); // resume / automatic resume
 
     private static Point GetAnchorPoint(IntPtr messageParameter)
     {

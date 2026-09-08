@@ -8,6 +8,7 @@ using System.Windows.Media;
 using System.Windows.Media.Media3D;
 using System.Windows.Media.Animation;
 using DisplayBrightness.ViewModels;
+using DisplayBrightness.Utilities;
 using WpfButtonBase = System.Windows.Controls.Primitives.ButtonBase;
 using WpfTextBoxBase = System.Windows.Controls.Primitives.TextBoxBase;
 
@@ -15,8 +16,6 @@ namespace DisplayBrightness;
 
 public partial class MainWindow : Window
 {
-    private const int BrightnessStep = 2;
-    private const int WheelDelta = 120;
     private const uint SwpNoActivate = 0x0010;
     private const uint SwpNoZOrder = 0x0004;
     private System.Drawing.Point? _anchorScreenPoint;
@@ -166,14 +165,14 @@ public partial class MainWindow : Window
     {
         if (sender is Slider slider && slider.DataContext is MonitorSliderViewModel vm)
         {
-            vm.CommitBrightness();
+            AsyncHelper.FireAndForget(async () => await vm.CommitBrightnessAsync(), "brightness change");
         }
     }
 
     private void Slider_KeyUp(object sender, System.Windows.Input.KeyEventArgs e)
     {
         if (sender is Slider slider && slider.DataContext is MonitorSliderViewModel vm)
-            vm.CommitBrightness();
+            AsyncHelper.FireAndForget(async () => await vm.CommitBrightnessAsync(), "brightness change");
     }
 
     private void MonitorCard_MouseWheel(object sender, MouseWheelEventArgs e)
@@ -185,11 +184,8 @@ public partial class MainWindow : Window
             return;
         }
 
-        int wheelSteps = e.Delta / WheelDelta;
-        if (wheelSteps == 0)
-            wheelSteps = Math.Sign(e.Delta);
-
-        viewModel.AdjustBrightness(wheelSteps * BrightnessStep);
+        AsyncHelper.FireAndForget(async () => await viewModel.AdjustBrightnessFromWheelAsync(
+            e.Delta), "brightness wheel adjustment");
         e.Handled = true;
     }
 }

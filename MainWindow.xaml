@@ -283,6 +283,7 @@
                                             <RowDefinition Height="Auto"/>
                                             <RowDefinition Height="Auto"/>
                                             <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
                                         </Grid.RowDefinitions>
                                         <Grid>
                                             <Grid.ColumnDefinitions>
@@ -353,13 +354,18 @@
                                             <Path Width="12" Height="12" Margin="0,0,9,0" VerticalAlignment="Center" Stretch="Uniform" Stroke="{StaticResource SubtleTextBrush}"
                                                   StrokeThickness="1.8" Data="M12,2 L12,5 M12,19 L12,22 M2,12 L5,12 M19,12 L22,12 M4.9,4.9 L7,7 M17,17 L19.1,19.1 M19.1,4.9 L17,7 M7,17 L4.9,19.1 M12,8 A4,4 0 1 1 11.9,8"/>
                                             <Slider Grid.Column="1" Style="{StaticResource ModernSliderStyle}" Minimum="0" Maximum="100"
+                                                    IsEnabled="{Binding CanAdjustBrightness}" ToolTip="{Binding BrightnessStatusText}"
                                                     Value="{Binding BrightnessValue, Mode=TwoWay}" TickFrequency="1" IsSnapToTickEnabled="True"
                                                     PreviewMouseUp="Slider_MouseUp" PreviewKeyUp="Slider_KeyUp"/>
                                             <Path Grid.Column="2" Width="16" Height="16" Margin="9,0,0,0" VerticalAlignment="Center" Stretch="Uniform" Stroke="{StaticResource MutedTextBrush}"
                                                   StrokeThickness="1.8" Data="M12,2 L12,5 M12,19 L12,22 M2,12 L5,12 M19,12 L22,12 M4.9,4.9 L7,7 M17,17 L19.1,19.1 M19.1,4.9 L17,7 M7,17 L4.9,19.1 M12,7 A5,5 0 1 1 11.9,7"/>
                                         </Grid>
 
-                                        <Border Grid.Row="2" Margin="0,12,0,0" Padding="10,9" Background="#171A22" CornerRadius="10"
+                                        <TextBlock Grid.Row="2" Text="{Binding BrightnessStatusText}" Margin="0,5,0,0"
+                                                   Foreground="{StaticResource MutedTextBrush}" FontSize="11" TextWrapping="Wrap"
+                                                   Visibility="{Binding HasBrightnessStatus, Converter={StaticResource BoolToVis}}"/>
+
+                                        <Border Grid.Row="3" Margin="0,12,0,0" Padding="10,9" Background="#171A22" CornerRadius="10"
                                                 Visibility="{Binding ShowOledCare, Converter={StaticResource BoolToVis}}">
                                             <Grid>
                                                 <Grid.RowDefinitions>
@@ -391,6 +397,9 @@
                                                             <TextBlock Text="{Binding LastPanelProtectValueText}" FontSize="12" FontWeight="Bold" Foreground="{StaticResource MutedTextBrush}"/>
                                                             <TextBlock Text="{Binding LastPanelProtectExplanationText}" FontSize="12" Foreground="{StaticResource MutedTextBrush}"/>
                                                         </WrapPanel>
+                                                        <TextBlock Text="{Binding OledOperationMessage}" Margin="0,5,0,0"
+                                                                   Foreground="#FFBF47" FontSize="11" TextWrapping="Wrap"
+                                                                   Visibility="{Binding HasOledOperationMessage, Converter={StaticResource BoolToVis}}"/>
                                                     </StackPanel>
                                                     <Button Grid.Column="1" Style="{StaticResource PanelProtectIconButtonStyle}"
                                                             Command="{Binding RunPixelRefreshCommand}"
@@ -421,7 +430,8 @@
                         <TextBlock Text="Launch at startup" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"/>
                         <TextBlock Text="Keep controls ready in the tray" Margin="0,3,0,0" FontSize="10" Foreground="{StaticResource SubtleTextBrush}"/>
                     </StackPanel>
-                    <CheckBox Grid.Column="1" Style="{StaticResource ToggleSwitchStyle}" VerticalAlignment="Center" IsChecked="{Binding StartOnStartup, Mode=TwoWay}"/>
+                    <CheckBox Grid.Column="1" Style="{StaticResource ToggleSwitchStyle}" VerticalAlignment="Center"
+                              IsEnabled="{Binding IsStartupReady}" IsChecked="{Binding StartOnStartup, Mode=TwoWay}"/>
                 </Grid>
             </Border>
         </Grid>

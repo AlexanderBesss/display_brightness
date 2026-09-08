@@ -63,6 +63,8 @@ public sealed class MsiHidCapabilitiesDiagnosticTests
     public async Task ProbeOledRegisters()
     {
         var transport = new MsiHidTransport();
+        string serial = new MonitorEnumerator().GetExternalMonitors()
+            .FirstOrDefault(m => m.HardwareId == "MSI3CD7")?.SerialNumber ?? string.Empty;
 
         string[] codes =
         [
@@ -80,6 +82,7 @@ public sealed class MsiHidCapabilitiesDiagnosticTests
             HidOperationResult result = await transport.GetAsync(
                 OledCompatibilityRegistry.MsiVendorId,
                 [0x3FA4],
+                serial,
                 code,
                 CancellationToken.None);
 

@@ -6,6 +6,99 @@ namespace DisplayBrightness.Tests;
 
 public sealed class MonitorSliderViewModelTests
 {
+    [Theory]
+    [InlineData(1, 240, 54)]
+    [InlineData(-1, 240, 46)]
+    [InlineData(15, 16, 54)]
+    public async Task PrecisionTouchpadInput_AccumulatesFractionalNotches(int delta, int count, int expected)
+    {
+        var writes = new List<int>();
+        using var vm = new MonitorSliderViewModel(CreateMonitor(), 50,
+            value => { writes.Add(value); return Task.FromResult(true); },
+            new FakeOledCareService(), new RejectingDialogService());
+        var gestures = Enumerable.Range(0, count).Select(_ => vm.AdjustBrightnessFromWheelAsync(delta)).ToArray();
+        await Task.WhenAll(gestures);
+        Assert.Equal(expected, vm.BrightnessValue);
+        Assert.Equal(expected, writes.Last());
+        Assert.True(vm.CanAdjustBrightness);
+    }
+
+    [Fact]
+    public async Task TransientWriteFailure_RetriesWithoutDisablingControls()
+    {
+        int attempts = 0;
+        using var vm = new MonitorSliderViewModel(CreateMonitor(), 50,
+            _ => Task.FromResult(++attempts > 1),
+            new FakeOledCareService(), new RejectingDialogService());
+        Assert.True(await vm.AdjustBrightnessAsync(2));
+        Assert.Equal(2, attempts);
+        Assert.Equal(52, vm.BrightnessValue);
+        Assert.True(vm.CanAdjustBrightness);
+        Assert.False(vm.HasBrightnessStatus);
+    }
+
+    [Fact]
+    public async Task NewInputDuringRetry_ReplacesTheFailedTarget()
+    {
+        var writes = new List<int>();
+        using var vm = new MonitorSliderViewModel(CreateMonitor(), 50,
+            value => { writes.Add(value); return Task.FromResult(writes.Count > 1); },
+            new FakeOledCareService(), new RejectingDialogService());
+        var first = vm.AdjustBrightnessAsync(2);
+        var second = vm.AdjustBrightnessAsync(10);
+        await Task.WhenAll(first, second);
+        Assert.Equal(new[] { 52, 62 }, writes);
+        Assert.Equal(62, vm.BrightnessValue);
+        Assert.True(vm.CanAdjustBrightness);
+    }
+
+    [Fact]
+    public async Task FastInput_IsPacedEvenWhenTheDriverReturnsImmediately()
+    {
+        var writes = new List<int>();
+        var times = new List<TimeSpan>();
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        using var vm = new MonitorSliderViewModel(CreateMonitor(), 50,
+            value => { writes.Add(value); times.Add(clock.Elapsed); return Task.FromResult(true); },
+            new FakeOledCareService(), new RejectingDialogService());
+        await vm.AdjustBrightnessAsync(2);
+        var updates = Enumerable.Range(0, 10).Select(_ => vm.AdjustBrightnessAsync(2)).ToArray();
+        await Task.WhenAll(updates);
+        Assert.Equal(new[] { 52, 72 }, writes);
+        Assert.True(times[1] - times[0] >= TimeSpan.FromMilliseconds(80));
+    }
+
+    [Fact]
+    public async Task DisconnectDuringRetry_DoesNotResendTheOldCommand()
+    {
+        int writes = 0;
+        using var vm = new MonitorSliderViewModel(CreateMonitor(), 50,
+            _ => { writes++; return Task.FromResult(false); },
+            new FakeOledCareService(), new RejectingDialogService());
+        var write = vm.AdjustBrightnessAsync(2);
+        vm.SuspendForTopologyChange();
+        Assert.False(await write);
+        Assert.Equal(1, writes);
+        Assert.False(vm.CanAdjustBrightness);
+    }
+
+    [Fact]
+    public async Task CompletedWrite_InvalidatesARefreshSnapshotTakenWhileItWasPending()
+    {
+        var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var vm = new MonitorSliderViewModel(CreateMonitor(), 50, _ => completion.Task,
+            new FakeOledCareService(), new RejectingDialogService());
+        vm.BrightnessValue = 80;
+        Task<bool> write = vm.CommitBrightnessAsync();
+        long snapshotRevision = vm.BrightnessRevision;
+        completion.SetResult(true);
+        Assert.True(await write);
+
+        vm.ApplyReading(CreateMonitor(), 50, snapshotRevision);
+
+        Assert.Equal(80, vm.BrightnessValue);
+    }
+
     [Fact]
     public async Task CancelledConfirmation_DoesNotSendPixelRefresh()
     {
@@ -14,7 +107,7 @@ public sealed class MonitorSliderViewModelTests
         var viewModel = new MonitorSliderViewModel(
             CreateMonitor(),
             50,
-            _ => true,
+            _ => Task.FromResult(true),
             oledService,
             new RejectingDialogService(),
             savePanelProtectHistory: _ => saveCount++);
@@ -37,7 +130,7 @@ public sealed class MonitorSliderViewModelTests
         var viewModel = new MonitorSliderViewModel(
             CreateMonitor(),
             50,
-            _ => true,
+            _ => Task.FromResult(true),
             oledService,
             new AcceptingDialogService(),
             savePanelProtectHistory: history => savedHistory = history,
@@ -71,7 +164,7 @@ public sealed class MonitorSliderViewModelTests
         var viewModel = new MonitorSliderViewModel(
             CreateMonitor(),
             50,
-            _ => true,
+            _ => Task.FromResult(true),
             oledService,
             new RejectingDialogService(),
             timeProvider: new FixedTimeProvider(now),
@@ -108,7 +201,7 @@ public sealed class MonitorSliderViewModelTests
         var viewModel = new MonitorSliderViewModel(
             CreateMonitor(),
             50,
-            _ => true,
+            _ => Task.FromResult(true),
             new FakeOledCareService(),
             new AcceptingDialogService(),
             timeProvider: new FixedTimeProvider(now),
@@ -139,7 +232,7 @@ public sealed class MonitorSliderViewModelTests
         var viewModel = new MonitorSliderViewModel(
             CreateMonitor(),
             50,
-            _ => true,
+            _ => Task.FromResult(true),
             oledService,
             new AcceptingDialogService(),
             originalHistory,
@@ -152,6 +245,9 @@ public sealed class MonitorSliderViewModelTests
 
         Assert.Equal(0, saveCount);
         Assert.Equal("30m", viewModel.LastPanelProtectValueText);
+        Assert.True(viewModel.HasOledOperationMessage);
+        Assert.Equal("could not start", viewModel.OledOperationMessage);
+        Assert.Equal("100", viewModel.OledStatusNumberText);
         Assert.Equal(
             " ago · Panel Protect started",
             viewModel.LastPanelProtectExplanationText);
@@ -170,7 +266,7 @@ public sealed class MonitorSliderViewModelTests
         var viewModel = new MonitorSliderViewModel(
             CreateMonitor(),
             50,
-            _ => true,
+            _ => Task.FromResult(true),
             oledService,
             new AcceptingDialogService(),
             new OledPanelProtectHistory(now - TimeSpan.FromHours(2), 100),
@@ -183,6 +279,7 @@ public sealed class MonitorSliderViewModelTests
 
         Assert.Equal(0, saveCount);
         Assert.Equal("0 panel hours", viewModel.LastPanelProtectValueText);
+        Assert.Contains("transport failed", viewModel.OledOperationMessage);
         viewModel.Dispose();
     }
 
@@ -248,7 +345,7 @@ public sealed class MonitorSliderViewModelTests
         var viewModel = new MonitorSliderViewModel(
             CreateMonitor(),
             50,
-            _ => true,
+            _ => Task.FromResult(true),
             oledService,
             new RejectingDialogService(),
             new OledPanelProtectHistory(now - TimeSpan.FromMinutes(130), 100),
@@ -273,7 +370,7 @@ public sealed class MonitorSliderViewModelTests
         var viewModel = new MonitorSliderViewModel(
             CreateMonitor(),
             50,
-            _ => true,
+            _ => Task.FromResult(true),
             oledService,
             new RejectingDialogService(),
             new OledPanelProtectHistory(now - TimeSpan.FromHours(10), 100),
@@ -295,7 +392,7 @@ public sealed class MonitorSliderViewModelTests
         var viewModel = new MonitorSliderViewModel(
             CreateMonitor(),
             50,
-            _ => true,
+            _ => Task.FromResult(true),
             new FakeOledCareService(),
             new RejectingDialogService(),
             new OledPanelProtectHistory(now - TimeSpan.FromMinutes(75), 100),
@@ -320,7 +417,7 @@ public sealed class MonitorSliderViewModelTests
         var viewModel = new MonitorSliderViewModel(
             CreateMonitor(rate),
             50,
-            _ => true,
+            _ => Task.FromResult(true),
             new FakeOledCareService(),
             new RejectingDialogService());
 
@@ -329,7 +426,7 @@ public sealed class MonitorSliderViewModelTests
     }
 
     [Fact]
-    public void OledSupport_DoesNotChangeBrightnessCommitBehavior()
+    public async Task OledSupport_DoesNotChangeBrightnessCommitBehavior()
     {
         int? committedBrightness = null;
         var viewModel = new MonitorSliderViewModel(
@@ -338,12 +435,12 @@ public sealed class MonitorSliderViewModelTests
             value =>
             {
                 committedBrightness = value;
-                return true;
+                return Task.FromResult(true);
             },
             new FakeOledCareService(),
             new RejectingDialogService());
 
-        bool adjusted = viewModel.AdjustBrightness(2);
+        bool adjusted = await viewModel.AdjustBrightnessAsync(2);
 
         Assert.True(adjusted);
         Assert.Equal(52, viewModel.BrightnessValue);
@@ -398,7 +495,7 @@ public sealed class MonitorSliderViewModelTests
         var viewModel = new MonitorSliderViewModel(
             monitor,
             50,
-            _ => true,
+            _ => Task.FromResult(true),
             oledService,
             new RejectingDialogService());
 
@@ -408,20 +505,20 @@ public sealed class MonitorSliderViewModelTests
     }
 
     [Fact]
-    public void FailedCommit_RestoresLastAppliedBrightness()
+    public async Task FailedCommit_RestoresLastAppliedBrightness()
     {
         var viewModel = new MonitorSliderViewModel(
             CreateMonitor(),
             50,
-            _ => false,
+            _ => Task.FromResult(false),
             new FakeOledCareService(),
             new RejectingDialogService());
 
         viewModel.BrightnessValue = 75;
-        viewModel.CommitBrightness();
+        await viewModel.CommitBrightnessAsync();
 
         Assert.Equal(50, viewModel.BrightnessValue);
-        Assert.False(viewModel.AdjustBrightness(2));
+        Assert.False(await viewModel.AdjustBrightnessAsync(2));
         Assert.Equal(50, viewModel.BrightnessValue);
     }
 
@@ -435,7 +532,7 @@ public sealed class MonitorSliderViewModelTests
         var viewModel = new MonitorSliderViewModel(
             CreateMonitor(),
             50,
-            _ => true,
+            _ => Task.FromResult(true),
             new FakeOledCareService(),
             new RejectingDialogService());
 
@@ -451,7 +548,7 @@ public sealed class MonitorSliderViewModelTests
         var viewModel = new MonitorSliderViewModel(
             CreateMonitor(),
             50,
-            _ => true,
+            _ => Task.FromResult(true),
             oledService,
             new RejectingDialogService());
 

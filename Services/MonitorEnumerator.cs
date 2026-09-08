@@ -10,6 +10,7 @@ public class MonitorEnumerator
     public List<MonitorInfo> GetExternalMonitors()
     {
         var monitors = Enumerate();
+        MonitorIdentityReader.PopulateSerialNumbers(monitors);
 
         if (monitors.Count == 0)
             return monitors;
@@ -115,7 +116,7 @@ public class MonitorEnumerator
             {
                 var dd2 = CreateDisplayDevice();
 
-                if (!DisplayInterop.EnumDisplayDevicesW(gpuName, j, ref dd2, 0))
+                if (!DisplayInterop.EnumDisplayDevicesW(gpuName, j, ref dd2, 1))
                     break;
 
                 var subName = dd2.DeviceName.TrimEnd('\0');
@@ -161,7 +162,7 @@ public class MonitorEnumerator
                 {
                     var dd2 = CreateDisplayDevice();
 
-                    if (!DisplayInterop.EnumDisplayDevicesW(devName, j, ref dd2, 0x40)) // EDDI_GET_DEVICE_INTERFACE_NAME
+                    if (!DisplayInterop.EnumDisplayDevicesW(devName, j, ref dd2, 1)) // EDD_GET_DEVICE_INTERFACE_NAME
                         continue;
 
                     var childString = dd2.DeviceString.TrimEnd('\0');
@@ -325,7 +326,7 @@ public class MonitorEnumerator
             {
                 var dd2 = CreateDisplayDevice();
 
-                if (!DisplayInterop.EnumDisplayDevicesW(deviceName, j, ref dd2, 0))
+                if (!DisplayInterop.EnumDisplayDevicesW(deviceName, j, ref dd2, 1))
                     break;
 
                 var subString = dd2.DeviceString.TrimEnd('\0');

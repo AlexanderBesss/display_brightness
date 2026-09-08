@@ -13,7 +13,10 @@ the .NET 8 Desktop Runtime (x64).
 - Control brightness of external monitors (HDMI, DisplayPort, DVI, VGA, USB-C)
 - System tray integration with right-click Exit menu
 - Left-click tray icon to show/hide the window
-- Scroll over the tray icon to adjust the primary display by 2% per wheel notch
+- Scroll over the tray icon to adjust the primary controllable display by 2% per
+  wheel notch (or the first controllable display if the primary is unavailable)
+- Background brightness changes and display discovery keep the tray responsive
+- Automatic recovery after display/USB changes and sleep, including while hidden
 - Persistent brightness settings per monitor
 - Standalone MSI OLED Care status, user-initiated Panel Protect support, and
   app-tracked time since the last successful Panel Protect launch
@@ -34,6 +37,16 @@ Experimental and use only the allow-listed Panel Protect command. The app does
 not schedule refreshes or infer refresh history; when the monitor does not return
 OLED Panel Info, it displays `Status unavailable`. A captured Panel Protect
 notification is latched locally until Panel Protect is started from this app.
+
+OLED Care matches the display's EDID serial number to the USB monitor's serial
+number before reading status or sending Panel Protect. Missing, duplicate, or
+unmatched identities disable OLED control with an explanation; the app never
+chooses a USB monitor by model alone. Displays with unreadable brightness stay
+disabled until a successful read. A failed write on a known controllable display
+gets one retry and leaves the controls available for another adjustment.
+Precision touchpad scrolling preserves fractional wheel movement, and rapid
+changes are combined and paced. Display changes trigger a debounced refresh;
+periodic background checks recover displays even while the popup stays hidden.
 
 ## Build
 

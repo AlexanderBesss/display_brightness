@@ -17,6 +17,11 @@ allow-listed Panel Protect command.
 - Windows path shape: `\\?\hid#vid_1462&pid_3fa4#...#{4d1e55b2-f16f-11cf-88cb-001111000030}`.
 - Total panel usage hours are not on the HID interface; read them via DDC/CI
   VCP feature `0xC0`.
+- Device selection requires an exact serial match: the active display's
+  `WmiMonitorID.SerialNumberID` is matched to GET `00130` on the USB interface.
+  Unknown/duplicate display serials, multiple matching USB interfaces, and an
+  absent matching device disable OLED control. VID/PID filters only select
+  candidates for GET-only identification; they do not authorize Panel Protect.
 
 ## 3. Short-command wire protocol
 

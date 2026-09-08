@@ -57,18 +57,21 @@ internal interface IMsiHidTransport
     Task<HidOperationResult> GetAsync(
         ushort vendorId,
         ushort[] productIds,
+        string monitorSerialNumber,
         string featureCode,
         CancellationToken cancellationToken);
 
     Task<HidOperationResult> GetScalerEventAsync(
         ushort vendorId,
         ushort[] productIds,
+        string monitorSerialNumber,
         string featureCode,
         CancellationToken cancellationToken);
 
     Task<HidOperationResult> SetAsync(
         ushort vendorId,
         ushort[] productIds,
+        string monitorSerialNumber,
         string featureCode,
         string value,
         CancellationToken cancellationToken);
@@ -76,6 +79,7 @@ internal interface IMsiHidTransport
     Task<HidOperationResult> SetNoAckAsync(
         ushort vendorId,
         ushort[] productIds,
+        string monitorSerialNumber,
         string featureCode,
         string value,
         CancellationToken cancellationToken);
@@ -130,6 +134,22 @@ internal static class MsiProtocol
 
 internal sealed class MsiHidTransport : IMsiHidTransport
 {
+    internal sealed record Command(string Frame, bool IsSet, bool WaitForAck,
+        string FeatureCode, string ReplyVerb);
+
+    private readonly Func<ushort, ushort[], List<string>> _enumerate;
+    private readonly Func<string, Command, CancellationToken, Task<HidOperationResult>> _execute;
+
+    internal MsiHidTransport(
+        Func<ushort, ushort[], List<string>>? enumerate = null,
+        Func<string, Command, CancellationToken, Task<HidOperationResult>>? execute = null)
+    {
+        _enumerate = enumerate ?? MsiHidNative.EnumerateDevicePaths;
+        _execute = execute ?? ((path, command, token) => ExecuteForPathAsync(
+            path, command.Frame, command.IsSet, command.WaitForAck,
+            command.FeatureCode, command.ReplyVerb, token));
+    }
+
     private const byte ReportId = 0x01;
     private const int MinimumReportLength = 64;
     private static readonly TimeSpan IoTimeout = TimeSpan.FromMilliseconds(2500);
@@ -138,11 +158,13 @@ internal sealed class MsiHidTransport : IMsiHidTransport
     public Task<HidOperationResult> GetAsync(
         ushort vendorId,
         ushort[] productIds,
+        string monitorSerialNumber,
         string featureCode,
         CancellationToken cancellationToken) =>
         ExecuteAsync(
             vendorId,
             productIds,
+            monitorSerialNumber,
             MsiProtocol.GetCommand(featureCode),
             isSet: false,
             waitForAck: false,
@@ -153,11 +175,13 @@ internal sealed class MsiHidTransport : IMsiHidTransport
     public Task<HidOperationResult> GetScalerEventAsync(
         ushort vendorId,
         ushort[] productIds,
+        string monitorSerialNumber,
         string featureCode,
         CancellationToken cancellationToken) =>
         ExecuteAsync(
             vendorId,
             productIds,
+            monitorSerialNumber,
             MsiProtocol.GetScalerEventCommand(featureCode),
             isSet: false,
             waitForAck: false,
@@ -168,12 +192,14 @@ internal sealed class MsiHidTransport : IMsiHidTransport
     public Task<HidOperationResult> SetAsync(
         ushort vendorId,
         ushort[] productIds,
+        string monitorSerialNumber,
         string featureCode,
         string value,
         CancellationToken cancellationToken) =>
         ExecuteAsync(
             vendorId,
             productIds,
+            monitorSerialNumber,
             MsiProtocol.SetCommand(featureCode, value),
             isSet: true,
             waitForAck: true,
@@ -184,12 +210,14 @@ internal sealed class MsiHidTransport : IMsiHidTransport
     public Task<HidOperationResult> SetNoAckAsync(
         ushort vendorId,
         ushort[] productIds,
+        string monitorSerialNumber,
         string featureCode,
         string value,
         CancellationToken cancellationToken) =>
         ExecuteAsync(
             vendorId,
             productIds,
+            monitorSerialNumber,
             MsiProtocol.SetCommand(featureCode, value),
             isSet: true,
             waitForAck: false,
@@ -197,53 +225,65 @@ internal sealed class MsiHidTransport : IMsiHidTransport
             MsiProtocol.ReplyVerb,
             cancellationToken);
 
-    private static async Task<HidOperationResult> ExecuteAsync(
+    private Task<HidOperationResult> ExecuteAsync(
         ushort vendorId,
         ushort[] productIds,
+        string monitorSerialNumber,
         string command,
         bool isSet,
         bool waitForAck,
         string featureCode,
         string replyVerb,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken) => Task.Run(
+            () => ExecuteCoreAsync(vendorId, productIds, monitorSerialNumber,
+                new Command(command, isSet, waitForAck, featureCode, replyVerb),
+                cancellationToken), cancellationToken);
+
+    private async Task<HidOperationResult> ExecuteCoreAsync(
+        ushort vendorId, ushort[] productIds, string monitorSerialNumber,
+        Command command, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        string serial = monitorSerialNumber.Trim();
+        if (serial.Length == 0 || serial.All(c => c == '0'))
+            return HidOperationResult.Fail(
+                "Cannot identify this display's serial number. OLED Care is unavailable.");
+
         await DeviceLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            List<string> paths = MsiHidNative.EnumerateDevicePaths(
+            List<string> paths = _enumerate(
                 vendorId,
                 productIds);
             if (paths.Count == 0)
                 return HidOperationResult.NotConnected();
 
             HidOperationResult? lastFailure = null;
-            bool foundBusyDevice = false;
+            var matches = new List<string>();
             foreach (string path in paths)
             {
-                HidOperationResult result = await ExecuteForPathAsync(
-                    path,
-                    command,
-                    isSet,
-                    waitForAck,
-                    featureCode,
-                    replyVerb,
-                    cancellationToken)
+                cancellationToken.ThrowIfCancellationRequested();
+                // Identification is GET-only. No status or write command may
+                // reach a device until its serial matches the selected display.
+                HidOperationResult result = await _execute(path,
+                    new Command(MsiProtocol.GetCommand("00130"), false, false,
+                        "00130", MsiProtocol.ReplyVerb), cancellationToken)
                     .ConfigureAwait(false);
-                if (result.State == HidOperationState.Busy)
+                if (result.State != HidOperationState.Success)
                 {
-                    foundBusyDevice = true;
+                    lastFailure = result;
                     continue;
                 }
-
-                if (result.State == HidOperationState.Success)
-                    return result;
-                lastFailure = result;
+                if (string.Equals(serial, result.Value.Trim(), StringComparison.OrdinalIgnoreCase))
+                    matches.Add(path);
             }
-
-            return foundBusyDevice
-                ? HidOperationResult.Busy()
-                : lastFailure ?? HidOperationResult.Fail(
-                    "The MSI OLED control interface did not respond.");
+            if (matches.Count > 1)
+                return HidOperationResult.Fail(
+                    "Multiple USB interfaces have this display's serial number. OLED Care is unavailable.");
+            if (matches.Count == 0)
+                return lastFailure ?? HidOperationResult.NotConnected();
+            cancellationToken.ThrowIfCancellationRequested();
+            return await _execute(matches[0], command, cancellationToken).ConfigureAwait(false);
         }
         finally
         {

@@ -22,6 +22,7 @@ public partial class App : System.Windows.Application
     private bool _isExiting;
     private int _pendingWheelSteps;
     private int _isWheelUpdateQueued;
+    private DispatcherTimer? _displayRefreshTimer;
 
     private void App_OnStartup(object sender, StartupEventArgs e)
     {
@@ -54,6 +55,13 @@ public partial class App : System.Windows.Application
         _trayIcon.MouseWheel += detents =>
             QueueBrightnessAdjustment(viewModel, detents);
         _trayIcon.IsWheelEnabled = viewModel.CanAdjustBrightness;
+        _trayIcon.DisplayConfigurationChanged += () => AsyncHelper.FireAndForget(
+            () => viewModel.HandleDisplayChangeAsync(), "display configuration change");
+        _displayRefreshTimer = new DispatcherTimer(
+            TimeSpan.FromSeconds(30), DispatcherPriority.Background,
+            (_, _) => AsyncHelper.FireAndForget(viewModel.RefreshIfStaleAsync, "background display recovery"),
+            Dispatcher);
+        _displayRefreshTimer.Start();
 
         viewModel.PropertyChanged += (_, args) =>
         {
@@ -189,14 +197,15 @@ public partial class App : System.Windows.Application
         Interlocked.Exchange(ref _isWheelUpdateQueued, 0);
 
         if (wheelSteps != 0)
-            viewModel.AdjustPrimaryBrightness(wheelSteps * BrightnessStep);
+            AsyncHelper.FireAndForget(async () => await viewModel.AdjustPrimaryBrightnessAsync(
+                wheelSteps * BrightnessStep), "tray brightness adjustment");
 
         if (Volatile.Read(ref _pendingWheelSteps) != 0)
             QueueBrightnessAdjustment(viewModel, 0);
     }
 
     private static string GetTrayText(int? brightness) => brightness.HasValue
-        ? $"Main monitor brightness - {brightness.Value}%"
+        ? $"Brightness - {brightness.Value}%"
         : "Brightness - no controllable displays";
 
     private System.Windows.Controls.ContextMenu CreateTrayMenu()
@@ -272,6 +281,8 @@ public partial class App : System.Windows.Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        _displayRefreshTimer?.Stop();
+        (_mainWindow?.DataContext as MainWindowViewModel)?.Dispose();
         DisposeTrayIcon();
         base.OnExit(e);
     }

@@ -48,6 +48,7 @@ public sealed class OledCareService : IOledCareService
         HidOperationResult result = await _transport.GetAsync(
             profile.HidVendorId,
             profile.HidProductIds,
+            monitor.SerialNumber,
             profile.PanelProtectCode,
             cancellationToken).ConfigureAwait(false);
 
@@ -64,6 +65,7 @@ public sealed class OledCareService : IOledCareService
         HidOperationResult refreshResult = await _transport.GetAsync(
             profile.HidVendorId,
             profile.HidProductIds,
+            monitor.SerialNumber,
             profile.RefreshRateCode,
             cancellationToken).ConfigureAwait(false);
 
@@ -112,6 +114,7 @@ public sealed class OledCareService : IOledCareService
         HidOperationResult result = await _transport.GetScalerEventAsync(
             profile.HidVendorId,
             profile.HidProductIds,
+            monitor.SerialNumber,
             OledCompatibilityRegistry.PanelProtectEventCode,
             cancellationToken).ConfigureAwait(false);
         if (result.State != HidOperationState.Success ||
@@ -189,6 +192,7 @@ public sealed class OledCareService : IOledCareService
         HidOperationResult result = await _transport.SetNoAckAsync(
             profile.HidVendorId,
             profile.HidProductIds,
+            monitor.SerialNumber,
             profile.PanelProtectCode,
             profile.PixelRefreshValue,
             cancellationToken).ConfigureAwait(false);

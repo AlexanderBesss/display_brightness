@@ -10,6 +10,9 @@ public static class DisplayInterop
     public const uint DISPLAYCONFIG_OUTPUT_TECHNOLOGY_VGA = 0;
     public const uint DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DVI = 4;
     public const uint DISPLAYCONFIG_OUTPUT_TECHNOLOGY_HDMI = 5;
+    public const uint DISPLAYCONFIG_OUTPUT_TECHNOLOGY_LVDS = 6;
+    public const uint DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DISPLAYPORT_EMBEDDED = 11;
+    public const uint DISPLAYCONFIG_OUTPUT_TECHNOLOGY_UDI_EMBEDDED = 13;
     public const uint DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DISPLAYPORT_EXTERNAL = 10;
     public const uint DISPLAYCONFIG_OUTPUT_TECHNOLOGY_UDI_EXTERNAL = 12;
     public const uint DISPLAYCONFIG_OUTPUT_TECHNOLOGY_INDIRECT_WIRED = 16;
@@ -43,7 +46,7 @@ public static class DisplayInterop
     [DllImport("user32.dll")]
     public static extern uint DisplayConfigGetDeviceInfo(IntPtr deviceInfo);
 
-    [DllImport("user32.dll")]
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
     public static extern bool EnumDisplayDevicesW(
         string? lpDevice,
         uint iDevNum,
@@ -281,6 +284,12 @@ public static class DisplayInterop
             DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DVI or
             DISPLAYCONFIG_OUTPUT_TECHNOLOGY_VGA;
     }
+
+    public static bool IsInternalTechnology(uint outputTechnology) =>
+        outputTechnology is DISPLAYCONFIG_OUTPUT_TECHNOLOGY_INTERNAL or
+            DISPLAYCONFIG_OUTPUT_TECHNOLOGY_LVDS or
+            DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DISPLAYPORT_EMBEDDED or
+            DISPLAYCONFIG_OUTPUT_TECHNOLOGY_UDI_EMBEDDED;
 
     public static string CharArrayToString(char[]? characters)
     {

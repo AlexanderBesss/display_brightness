@@ -21,9 +21,8 @@ public class DisplayService : IDisplayService
         return GetController(monitor).SetBrightness(monitor, brightness);
     }
 
-    private IBrightnessController GetController(MonitorInfo monitor) =>
-        monitor.OutputTechnology ==
-            DisplayInterop.DISPLAYCONFIG_OUTPUT_TECHNOLOGY_INTERNAL
+    internal IBrightnessController GetController(MonitorInfo monitor) =>
+        DisplayInterop.IsInternalTechnology(monitor.OutputTechnology)
                 ? _wmiController
                 : _brightnessController;
 }

@@ -5,6 +5,67 @@ namespace DisplayBrightness.Tests;
 
 public sealed class MsiHidTransportTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Commands_OnlyReachTheSelectedMonitor(bool write)
+    {
+        var commands = new List<(string Path, MsiHidTransport.Command Command)>();
+        var transport = new MsiHidTransport((_, _) => ["usb-A", "usb-B"],
+            (path, command, _) =>
+            {
+                commands.Add((path, command));
+                return Task.FromResult(HidOperationResult.Ok(command.FeatureCode == "00130"
+                    ? (path == "usb-A" ? "SERIAL-A" : "SERIAL-B") : "001"));
+            });
+
+        var result = write
+            ? await transport.SetNoAckAsync(0x1462, [0x3FA4], "SERIAL-B", "00;10", "001", default)
+            : await transport.GetAsync(0x1462, [0x3FA4], "SERIAL-B", "00;10", default);
+
+        Assert.Equal(HidOperationState.Success, result.State);
+        var selected = Assert.Single(commands, c => c.Command.FeatureCode != "00130");
+        Assert.Equal("usb-B", selected.Path);
+        Assert.Equal(write, selected.Command.IsSet);
+    }
+
+    [Theory]
+    [InlineData("", "SERIAL-A", "SERIAL-B")]
+    [InlineData("000", "SERIAL-A", "SERIAL-B")]
+    [InlineData("SERIAL-MISSING", "SERIAL-A", "SERIAL-B")]
+    [InlineData("SERIAL-A", "SERIAL-A", "SERIAL-A")]
+    [InlineData("SERIAL", "SERIAL-A", "SERIAL-B")]
+    public async Task MissingOrAmbiguousIdentity_NeverSendsPanelProtect(string selected, string first, string second)
+    {
+        int writes = 0;
+        var transport = new MsiHidTransport((_, _) => ["usb-A", "usb-B"],
+            (path, command, _) =>
+            {
+                if (command.IsSet) writes++;
+                return Task.FromResult(HidOperationResult.Ok(path == "usb-A" ? first : second));
+            });
+
+        var result = await transport.SetNoAckAsync(0x1462, [0x3FA4], selected, "00;10", "001", default);
+        Assert.NotEqual(HidOperationState.Success, result.State);
+        Assert.Equal(0, writes);
+    }
+
+    [Fact]
+    public async Task CancellationAfterIdentification_PreventsTheWrite()
+    {
+        using var cancellation = new CancellationTokenSource();
+        int writes = 0;
+        var transport = new MsiHidTransport((_, _) => ["usb-A"], (_, command, _) =>
+        {
+            if (command.IsSet) writes++;
+            cancellation.Cancel();
+            return Task.FromResult(HidOperationResult.Ok("SERIAL-A"));
+        });
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            transport.SetNoAckAsync(0x1462, [0x3FA4], "SERIAL-A", "00;10", "001", cancellation.Token));
+        Assert.Equal(0, writes);
+    }
+
     [Fact]
     public void BuildOutputReport_PrependsReportIdAndPadsFrame()
     {
@@ -82,6 +143,7 @@ public sealed class MsiHidTransportTests
             transport.GetAsync(
                 OledCompatibilityRegistry.MsiVendorId,
                 [0x3FA4],
+                "TEST-SERIAL",
                 OledCompatibilityRegistry.PanelProtectCode,
                 source.Token));
     }

@@ -7,7 +7,7 @@ namespace DisplayBrightness.Tests;
 public sealed class MainWindowViewModelTests
 {
     [Fact]
-    public void FailedBrightnessWrite_IsNotDisplayedOrPersisted()
+    public async Task FailedBrightnessWrite_IsNotDisplayedOrPersisted()
     {
         var storage = new FakeStorageService();
         var display = new FakeDisplayService();
@@ -16,18 +16,20 @@ public sealed class MainWindowViewModelTests
             storage,
             new UnsupportedOledCareService(),
             new RejectingDialogService());
+        await viewModel.InitializationTask;
 
-        bool adjusted = viewModel.Monitors.Single().AdjustBrightness(10);
+        bool adjusted = await viewModel.Monitors.Single().AdjustBrightnessAsync(10);
 
         Assert.False(adjusted);
         Assert.Equal(50, viewModel.Monitors.Single().BrightnessValue);
         Assert.Empty(storage.Settings);
         Assert.Equal(0, storage.SaveCount);
-        Assert.Equal(1, display.SetCount);
+        Assert.Equal(2, display.SetCount); // One bounded retry.
+        Assert.True(viewModel.CanAdjustBrightness);
     }
 
     [Fact]
-    public void FailedStartupRegistration_DoesNotLeaveToggleEnabled()
+    public async Task FailedStartupRegistration_DoesNotLeaveToggleEnabled()
     {
         var storage = new FakeStorageService { StartupWriteSucceeds = false };
         var viewModel = new MainWindowViewModel(
@@ -35,6 +37,7 @@ public sealed class MainWindowViewModelTests
             storage,
             new UnsupportedOledCareService(),
             new RejectingDialogService());
+        await viewModel.InitializationTask;
 
         viewModel.StartOnStartup = true;
 
@@ -42,7 +45,7 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
-    public void TrayWheel_UsesPrimaryMonitorFromCurrentMonitorList()
+    public async Task TrayWheel_UsesPrimaryMonitorFromCurrentMonitorList()
     {
         string stalePrimaryDisplayName =
             System.Windows.Forms.Screen.PrimaryScreen?.DeviceName
@@ -63,11 +66,12 @@ public sealed class MainWindowViewModelTests
             new FakeStorageService(),
             new UnsupportedOledCareService(),
             new RejectingDialogService());
+        await viewModel.InitializationTask;
 
         foreach (MonitorSliderViewModel monitor in viewModel.Monitors)
             monitor.IsPrimary = monitor.DisplayName == currentPrimaryMonitor.DisplayName;
 
-        bool adjusted = viewModel.AdjustPrimaryBrightness(2);
+        bool adjusted = await viewModel.AdjustPrimaryBrightnessAsync(2);
 
         Assert.True(adjusted);
         Assert.Equal(currentPrimaryMonitor.DevicePath, display.LastAdjustedDevicePath);
@@ -90,6 +94,7 @@ public sealed class MainWindowViewModelTests
             new ReadyOledCareService(),
             new RejectingDialogService(),
             timeProvider);
+        await viewModel.InitializationTask;
 
         Assert.EndsWith(
             "Panel Protect started",
@@ -123,6 +128,7 @@ public sealed class MainWindowViewModelTests
             new ReadyOledCareService(),
             new RejectingDialogService(),
             timeProvider);
+        await viewModel.InitializationTask;
 
         Assert.True(viewModel.Monitors.Single()
             .HasPendingPanelProtectNotification);
@@ -147,6 +153,7 @@ public sealed class MainWindowViewModelTests
             new UnsupportedOledCareService(),
             new RejectingDialogService(),
             timeProvider);
+        await viewModel.InitializationTask;
 
         await viewModel.RefreshIfStaleAsync();
         timeProvider.Advance(TimeSpan.FromSeconds(59));

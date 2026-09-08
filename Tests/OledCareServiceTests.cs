@@ -6,6 +6,22 @@ namespace DisplayBrightness.Tests;
 public sealed class OledCareServiceTests
 {
     [Fact]
+    public async Task EveryOledOperation_CarriesTheSelectedDisplaysSerial()
+    {
+        var transport = new FakeTransport();
+        var service = new OledCareService(transport, _ => null);
+        var monitor = CreateMsiMonitor();
+        monitor.SerialNumber = "SELECTED-SERIAL";
+        await service.GetStatusAsync(monitor);
+        Assert.Equal("SELECTED-SERIAL", transport.LastSerial);
+        monitor.SerialNumber = "SECOND-SERIAL";
+        await service.GetPanelProtectEventAsync(monitor);
+        Assert.Equal("SECOND-SERIAL", transport.LastSerial);
+        await service.StartPixelRefreshAsync(monitor);
+        Assert.Equal("SECOND-SERIAL", transport.LastSerial);
+    }
+
+    [Fact]
     public async Task GetStatus_DoesNotContactHid_ForUnsupportedMonitor()
     {
         var transport = new FakeTransport();
@@ -216,6 +232,7 @@ public sealed class OledCareServiceTests
 
     private sealed class FakeTransport : IMsiHidTransport
     {
+        public string? LastSerial { get; private set; }
         public int GetCount { get; private set; }
         public int SetCount { get; private set; }
         public int NoAckSetCount { get; private set; }
@@ -237,6 +254,7 @@ public sealed class OledCareServiceTests
         public Task<HidOperationResult> GetAsync(
             ushort vendorId,
             ushort[] productIds,
+            string monitorSerialNumber,
             string featureCode,
             CancellationToken cancellationToken)
         {
@@ -244,6 +262,7 @@ public sealed class OledCareServiceTests
                 return Task.FromCanceled<HidOperationResult>(cancellationToken);
 
             GetCount++;
+            LastSerial = monitorSerialNumber;
             LastGetCode = featureCode;
             GetCodes.Add(featureCode);
             if (ResultsByCode is { } byCode &&
@@ -255,6 +274,7 @@ public sealed class OledCareServiceTests
         public Task<HidOperationResult> SetAsync(
             ushort vendorId,
             ushort[] productIds,
+            string monitorSerialNumber,
             string featureCode,
             string value,
             CancellationToken cancellationToken)
@@ -268,10 +288,12 @@ public sealed class OledCareServiceTests
         public Task<HidOperationResult> GetScalerEventAsync(
             ushort vendorId,
             ushort[] productIds,
+            string monitorSerialNumber,
             string featureCode,
             CancellationToken cancellationToken)
         {
             ScalerEventGetCount++;
+            LastSerial = monitorSerialNumber;
             LastScalerEventCode = featureCode;
             return Task.FromResult(ScalerEventResult);
         }
@@ -279,11 +301,13 @@ public sealed class OledCareServiceTests
         public Task<HidOperationResult> SetNoAckAsync(
             ushort vendorId,
             ushort[] productIds,
+            string monitorSerialNumber,
             string featureCode,
             string value,
             CancellationToken cancellationToken)
         {
             NoAckSetCount++;
+            LastSerial = monitorSerialNumber;
             LastNoAckSetCode = featureCode;
             LastNoAckSetValue = value;
             return Task.FromResult(HidOperationResult.Ok());

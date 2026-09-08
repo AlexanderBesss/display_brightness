@@ -37,6 +37,7 @@ public class WmiBrightnessController : IBrightnessController
             using var results = searcher.Get();
 
             var methods = results.Cast<ManagementObject>().ToList();
+            uint? returnCode;
             try
             {
                 var target = methods.FirstOrDefault(method =>
@@ -53,26 +54,44 @@ public class WmiBrightnessController : IBrightnessController
                 input["Timeout"] = 0u;
                 input["Brightness"] = (byte)brightness;
 
-                // Several laptop drivers return null even when the void WMI method
-                // succeeds, so success is confirmed by reading the brightness back.
-                using var ignoredResult = target.InvokeMethod(
+                using var result = target.InvokeMethod(
                     "WmiSetBrightness", input, null);
+                object? code = result?.Properties["ReturnValue"]?.Value;
+                returnCode = code == null ? null : Convert.ToUInt32(code);
             }
             finally
             {
                 DisposeAll(methods);
             }
 
-            var current = ReadCurrentBrightness(scope, instancePrefix);
-            if (current.HasValue)
-                return current.Value == brightness;
-
-            return true;
+            return ConfirmWrite(returnCode, brightness,
+                () => ReadCurrentBrightness(scope, instancePrefix), Thread.Sleep);
         }
         catch
         {
             return false;
         }
+    }
+
+    internal static bool ConfirmWrite(uint? returnCode, int requested,
+        Func<int?> readBrightness, Action<TimeSpan> wait)
+    {
+        // WmiSetBrightness's documented result is authoritative. CurrentBrightness
+        // can lag behind a successful write, especially during continuous input.
+        if (returnCode.HasValue)
+            return returnCode.Value == 0;
+
+        // Some drivers omit ReturnValue. Give their readback a bounded settling
+        // period instead of failing on the first stale sample. This runs on the
+        // brightness worker, never the dispatcher thread.
+        for (int attempt = 0; attempt < 6; attempt++)
+        {
+            if (attempt > 0)
+                wait(TimeSpan.FromMilliseconds(50));
+            if (readBrightness() == requested)
+                return true;
+        }
+        return false;
     }
 
     private static int? ReadCurrentBrightness(

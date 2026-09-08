@@ -212,11 +212,13 @@ public class BrightnessController : IBrightnessController
         DisplayInterop.EnumDisplayMonitors(
             IntPtr.Zero, IntPtr.Zero, callback, IntPtr.Zero);
 
-        if (exactMatches.Count > 0)
+        // GDI display names can be reassigned after a disconnect, even before
+        // the app receives WM_DISPLAYCHANGE. Validate a stable device ID first.
+        if (!NormalizeMonitorId(monitor.DevicePath).StartsWith(
+                "DISPLAY\\", StringComparison.OrdinalIgnoreCase))
             return exactMatches;
 
-        // DisplayConfig-based monitor records carry a monitor device ID rather
-        // than a GDI display name. Match that ID to each active display adapter.
+        exactMatches.Clear();
         foreach (var item in all)
         {
             if (LogicalDisplayContainsMonitor(item.DeviceName, monitor.DevicePath))
@@ -249,14 +251,7 @@ public class BrightnessController : IBrightnessController
                 break;
             }
 
-            var candidate = NormalizeMonitorId(device.DeviceID);
-            if (candidate.Length > 0 &&
-                (string.Equals(candidate, requested,
-                     StringComparison.OrdinalIgnoreCase) ||
-                 candidate.Contains(requested,
-                     StringComparison.OrdinalIgnoreCase) ||
-                 requested.Contains(candidate,
-                     StringComparison.OrdinalIgnoreCase)))
+            if (MonitorIdsMatch(device.DeviceID, requested))
             {
                 return true;
             }
@@ -265,14 +260,12 @@ public class BrightnessController : IBrightnessController
         return false;
     }
 
-    private static string NormalizeMonitorId(string value)
-    {
-        return (value ?? string.Empty)
-            .Replace("\\\\?\\", string.Empty, StringComparison.OrdinalIgnoreCase)
-            .Replace('#', '\\')
-            .TrimEnd('\0')
-            .Trim();
-    }
+    internal static bool MonitorIdsMatch(string candidate, string requested) =>
+        !string.IsNullOrWhiteSpace(candidate) && !string.IsNullOrWhiteSpace(requested) &&
+        string.Equals(NormalizeMonitorId(candidate), NormalizeMonitorId(requested), StringComparison.OrdinalIgnoreCase);
+
+    private static string NormalizeMonitorId(string value) =>
+        WmiBrightnessController.GetWmiInstancePrefix(value).Trim();
 
     private sealed record LogicalMonitor(IntPtr Handle, string DeviceName);
 }

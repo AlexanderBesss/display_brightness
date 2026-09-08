@@ -8,8 +8,19 @@ namespace DisplayBrightness.ViewModels;
 
 public class MonitorSliderViewModel : ViewModelBase, IDisposable
 {
+    private static readonly TimeSpan MinimumBrightnessWriteInterval = TimeSpan.FromMilliseconds(100);
+    private long? _lastBrightnessWriteTimestamp;
+    private int _wheelRemainder;
     private readonly MonitorInfo _monitor;
-    private readonly Func<int, bool> _commitBrightness;
+    private readonly Func<int, Task<bool>> _commitBrightness;
+    private int? _pendingBrightness;
+    private bool _isBrightnessWriteRunning;
+    private Task<bool> _brightnessWriteTask = Task.FromResult(true);
+    private bool _isBrightnessAvailable;
+    private bool _isTopologyStale;
+    private int _connectionVersion;
+    internal long BrightnessRevision { get; private set; }
+    internal MonitorInfo Monitor => _monitor;
     private readonly IOledCareService _oledCareService;
     private readonly IUserDialogService _dialogService;
     private readonly Action<OledPanelProtectHistory>? _savePanelProtectHistory;
@@ -27,10 +38,40 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
     private OledPanelProtectNotification? _panelProtectNotification;
     private OledPanelProtectEventType? _ignoredPanelProtectEventTypeUntilClear;
 
-    internal string DisplayName { get; }
-    public string FriendlyName { get; }
-    public string ModelName { get; }
-    public bool IsPrimary { get; internal set; }
+    internal string DisplayName => _monitor.DisplayName;
+    public string FriendlyName => _monitor.FriendlyName;
+    public string ModelName => _monitor.ModelName;
+    private bool _isPrimary;
+    public bool IsPrimary
+    {
+        get => _isPrimary;
+        internal set => SetProperty(ref _isPrimary, value);
+    }
+
+    public bool CanAdjustBrightness => !_isDisposed && !_isTopologyStale && _isBrightnessAvailable;
+    private string _brightnessStatusText = string.Empty;
+    public string BrightnessStatusText
+    {
+        get => _brightnessStatusText;
+        private set
+        {
+            if (SetProperty(ref _brightnessStatusText, value))
+                OnPropertyChanged(nameof(HasBrightnessStatus));
+        }
+    }
+    public bool HasBrightnessStatus => BrightnessStatusText.Length > 0;
+
+    private string _oledOperationMessage = string.Empty;
+    public string OledOperationMessage
+    {
+        get => _oledOperationMessage;
+        private set
+        {
+            if (SetProperty(ref _oledOperationMessage, value))
+                OnPropertyChanged(nameof(HasOledOperationMessage));
+        }
+    }
+    public bool HasOledOperationMessage => OledOperationMessage.Length > 0;
 
     public bool HasRefreshRate => RefreshRateText.Length > 0;
     public string RefreshRateText =>
@@ -73,7 +114,7 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
 
     private OledCareStatus? _oledStatus;
     public bool CanRunPixelRefresh =>
-        !IsOledBusy && (_oledStatus?.CanRunPixelRefresh ?? false);
+        !_isDisposed && !_isTopologyStale && !IsOledBusy && (_oledStatus?.CanRunPixelRefresh ?? false);
 
     private string _oledStatusText = "Checking OLED Panel Info…";
     public string OledStatusText
@@ -123,16 +164,19 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
         {
             double clampedValue = Math.Clamp(value, 0, 100);
             if (SetProperty(ref _brightnessValue, clampedValue))
+            {
+                BrightnessRevision++;
                 OnPropertyChanged(nameof(BrightnessText));
+            }
         }
     }
 
-    public string BrightnessText => $"{(int)BrightnessValue}%";
+    public string BrightnessText => CanAdjustBrightness ? $"{(int)BrightnessValue}%" : "Unavailable";
 
     public MonitorSliderViewModel(
         MonitorInfo monitor,
-        int initialBrightness,
-        Func<int, bool> commitBrightness,
+        int? initialBrightness,
+        Func<int, Task<bool>> commitBrightness,
         IOledCareService oledCareService,
         IUserDialogService dialogService,
         OledPanelProtectHistory? panelProtectHistory = null,
@@ -142,11 +186,11 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
         Action<OledPanelProtectNotification?>? savePanelProtectNotification = null)
     {
         _monitor = monitor;
-        DisplayName = monitor.DisplayName;
-        FriendlyName = monitor.FriendlyName;
-        ModelName = monitor.ModelName;
-        _brightnessValue = Math.Clamp(initialBrightness, 0, 100);
+        _isBrightnessAvailable = initialBrightness.HasValue;
+        _brightnessValue = Math.Clamp(initialBrightness ?? 0, 0, 100);
         _committedBrightness = (int)_brightnessValue;
+        if (!initialBrightness.HasValue)
+            BrightnessStatusText = "Brightness unavailable. Check the display connection and brightness-control support, then refresh.";
         _commitBrightness = commitBrightness;
         _oledCareService = oledCareService;
         _dialogService = dialogService;
@@ -187,34 +231,156 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public void CommitBrightness()
+    public Task<bool> CommitBrightnessAsync()
     {
-        int brightness = (int)BrightnessValue;
-        if (_commitBrightness(brightness))
-        {
-            _committedBrightness = brightness;
-            return;
-        }
+        if (!CanAdjustBrightness)
+            return Task.FromResult(false);
 
-        BrightnessValue = _committedBrightness;
+        BrightnessRevision++;
+        _pendingBrightness = (int)BrightnessValue;
+        if (!_isBrightnessWriteRunning)
+        {
+            _isBrightnessWriteRunning = true;
+            _brightnessWriteTask = DrainBrightnessAsync();
+        }
+        return _brightnessWriteTask;
     }
 
-    internal bool AdjustBrightness(int delta)
+    internal Task<bool> AdjustBrightnessAsync(int delta)
     {
+        if (!CanAdjustBrightness)
+            return Task.FromResult(false);
         int currentBrightness = (int)BrightnessValue;
         int adjustedBrightness = Math.Clamp(currentBrightness + delta, 0, 100);
         if (adjustedBrightness == currentBrightness)
-            return false;
+            return Task.FromResult(false);
 
         BrightnessValue = adjustedBrightness;
-        if (_commitBrightness(adjustedBrightness))
-        {
-            _committedBrightness = adjustedBrightness;
-            return true;
-        }
+        return CommitBrightnessAsync();
+    }
 
-        BrightnessValue = _committedBrightness;
-        return false;
+    internal Task<bool> AdjustBrightnessFromWheelAsync(int delta)
+    {
+        if (!CanAdjustBrightness)
+        {
+            _wheelRemainder = 0;
+            return Task.FromResult(false);
+        }
+        // Precision touchpads emit fractions of the standard 120-unit notch.
+        // Preserve those fractions rather than multiplying every tiny event by 2%.
+        _wheelRemainder += delta;
+        int notches = _wheelRemainder / 120;
+        _wheelRemainder %= 120;
+        return notches == 0 ? Task.FromResult(false) : AdjustBrightnessAsync(notches * 2);
+    }
+
+    private async Task<bool> DrainBrightnessAsync()
+    {
+        bool success = false;
+        int failures = 0;
+        try
+        {
+            while (_pendingBrightness.HasValue && CanAdjustBrightness)
+            {
+                if (_lastBrightnessWriteTimestamp is long previous)
+                {
+                    TimeSpan remaining = MinimumBrightnessWriteInterval - _timeProvider.GetElapsedTime(previous);
+                    if (remaining > TimeSpan.Zero)
+                        await Task.Delay(remaining, _lifetimeCancellation.Token);
+                }
+                if (!CanAdjustBrightness || _pendingBrightness is not int brightness)
+                    break;
+                int connection = _connectionVersion;
+                _pendingBrightness = null;
+                _lastBrightnessWriteTimestamp = _timeProvider.GetTimestamp();
+                try { success = await _commitBrightness(brightness); }
+                catch { success = false; }
+                if (_isDisposed)
+                    return false;
+                if (connection != _connectionVersion)
+                    continue;
+                BrightnessRevision++;
+                if (success)
+                {
+                    failures = 0;
+                    _committedBrightness = brightness;
+                    BrightnessStatusText = string.Empty;
+                }
+                else
+                {
+                    failures++;
+                    if (_pendingBrightness == null && failures < 2)
+                    {
+                        // One paced retry for a transient failure. Newer input
+                        // arriving during the delay replaces this value.
+                        _pendingBrightness = brightness;
+                    }
+                    else if (_pendingBrightness == null)
+                    {
+                        BrightnessValue = _committedBrightness;
+                        BrightnessStatusText = "Brightness could not be changed. Try adjusting it again.";
+                        // A rejected write does not erase demonstrated support.
+                        // Only a failed discovery/read or disconnect disables it.
+                    }
+                }
+            }
+            return success;
+        }
+        catch (OperationCanceledException) when (_isDisposed)
+        {
+            return false;
+        }
+        finally
+        {
+            _pendingBrightness = null;
+            _isBrightnessWriteRunning = false;
+        }
+    }
+
+    internal void SuspendForTopologyChange()
+    {
+        _isTopologyStale = true;
+        _connectionVersion++;
+        _pendingBrightness = null;
+        _wheelRemainder = 0;
+        BrightnessRevision++;
+        SetBrightnessAvailability(false, "Reconnecting display…");
+        OnPropertyChanged(nameof(CanRunPixelRefresh));
+        CommandManager.InvalidateRequerySuggested();
+    }
+
+    internal void ApplyReading(MonitorInfo monitor, int? brightness, long expectedRevision)
+    {
+        _monitor.DisplayName = monitor.DisplayName;
+        _monitor.FriendlyName = monitor.FriendlyName;
+        _monitor.ModelName = monitor.ModelName;
+        _monitor.OutputTechnology = monitor.OutputTechnology;
+        _monitor.RefreshRateHz = monitor.RefreshRateHz;
+        _monitor.SerialNumber = monitor.SerialNumber;
+        bool reconnecting = _isTopologyStale;
+        _isTopologyStale = false;
+        if (reconnecting || (!_isBrightnessWriteRunning && BrightnessRevision == expectedRevision))
+        {
+            BrightnessValue = brightness ?? _committedBrightness;
+            if (brightness.HasValue)
+                _committedBrightness = (int)BrightnessValue;
+            SetBrightnessAvailability(brightness.HasValue, brightness.HasValue ? string.Empty :
+                "Brightness unavailable. Check the display connection and brightness-control support, then refresh.");
+        }
+        OnPropertyChanged(nameof(FriendlyName));
+        OnPropertyChanged(nameof(ModelName));
+        OnPropertyChanged(nameof(RefreshRateText));
+        OnPropertyChanged(nameof(HasRefreshRate));
+        if (ShowOledCare && !IsOledBusy)
+            AsyncHelper.FireAndForget(() => RefreshOledStatusAsync(_lifetimeCancellation.Token), "OLED status refresh");
+    }
+
+    private void SetBrightnessAvailability(bool available, string message)
+    {
+        _isBrightnessAvailable = available;
+        BrightnessStatusText = message;
+        OnPropertyChanged(nameof(CanAdjustBrightness));
+        OnPropertyChanged(nameof(BrightnessText));
     }
 
     private async Task RefreshOledStatusAsync(CancellationToken cancellationToken)
@@ -249,9 +415,14 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
             return;
 
         IsOledBusy = true;
+        OledOperationMessage = string.Empty;
         try
         {
-            PixelRefreshResult result = await _oledCareService.StartPixelRefreshAsync(_monitor);
+            PixelRefreshResult result = await _oledCareService.StartPixelRefreshAsync(
+                _monitor, _lifetimeCancellation.Token);
+            if (_isDisposed)
+                return;
+            OledOperationMessage = result.Message;
             if (result.Started)
             {
                 _panelProtectHistory = new OledPanelProtectHistory(
@@ -282,7 +453,8 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
         }
         catch (Exception ex)
         {
-            OledStatusText = $"Pixel refresh could not be started: {ex.Message}";
+            if (!_isDisposed)
+                OledOperationMessage = OledStatusText = $"Pixel refresh could not be started: {ex.Message}";
         }
         finally
         {

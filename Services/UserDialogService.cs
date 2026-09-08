@@ -9,9 +9,8 @@ public sealed class UserDialogService : IUserDialogService
     {
         string message =
             $"Run pixel refresh on {monitor.FriendlyName}?\n\n" +
-            "The display shows a warning during the refresh. Do not look at the " +
-            "screen directly and do not unplug the monitor or disconnect its " +
-            "power while the refresh is running.";
+            "Do not unplug the monitor or disconnect its power while the refresh " +
+            "is running.";
 
         if (supportLevel == OledSupportLevel.Experimental)
         {

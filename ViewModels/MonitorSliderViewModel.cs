@@ -199,6 +199,12 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
         _panelProtectNotification = panelProtectNotification;
         _savePanelProtectNotification = savePanelProtectNotification;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        if (_panelProtectHistory is { } completedProtect &&
+            _panelProtectNotification is { } notification &&
+            completedProtect.LastStartedAtUtc >= notification.FirstObservedAtUtc)
+        {
+            SetPanelProtectNotification(null);
+        }
         OledSupportLevel = _oledCareService.GetSupportLevel(monitor);
         RunPixelRefreshCommand = new AsyncRelayCommand(
             RunPixelRefreshAsync,
@@ -605,6 +611,12 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
             else if (panelEvent?.Type == OledPanelProtectEventType.None)
             {
                 _ignoredPanelProtectEventTypeUntilClear = null;
+                if (_panelProtectHistory is { } completedProtect &&
+                    _panelProtectNotification is { } notification &&
+                    completedProtect.LastStartedAtUtc >= notification.FirstObservedAtUtc)
+                {
+                    SetPanelProtectNotification(null);
+                }
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

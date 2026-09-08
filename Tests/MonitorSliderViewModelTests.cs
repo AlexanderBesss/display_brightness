@@ -218,6 +218,36 @@ public sealed class MonitorSliderViewModelTests
     }
 
     [Fact]
+    public async Task CompletedProtect_ClearsPersistedNotificationOnStartup()
+    {
+        var now = new DateTimeOffset(2026, 9, 1, 17, 30, 0, TimeSpan.Zero);
+        var completedProtect = new OledPanelProtectHistory(
+            now,
+            100);
+        var notification = new OledPanelProtectNotification(
+            OledPanelProtectEventType.ShortTime,
+            now - TimeSpan.FromMinutes(5),
+            100);
+        OledPanelProtectNotification? savedNotification = notification;
+
+        var viewModel = new MonitorSliderViewModel(
+            CreateMonitor(),
+            50,
+            _ => Task.FromResult(true),
+            new FakeOledCareService(),
+            new RejectingDialogService(),
+            panelProtectHistory: completedProtect,
+            timeProvider: new FixedTimeProvider(now),
+            panelProtectNotification: notification,
+            savePanelProtectNotification: value => savedNotification = value);
+
+        await WaitUntilAsync(() => savedNotification == null);
+
+        Assert.False(viewModel.HasPendingPanelProtectNotification);
+        viewModel.Dispose();
+    }
+
+    [Fact]
     public async Task FailedPixelRefresh_DoesNotOverwriteHistory()
     {
         var now = new DateTimeOffset(2026, 9, 1, 9, 15, 0, TimeSpan.Zero);

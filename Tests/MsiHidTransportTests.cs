@@ -51,6 +51,25 @@ public sealed class MsiHidTransportTests
     }
 
     [Fact]
+    public async Task SingleResponsiveCandidate_IsUsedWhenEdidAndHidSerialsDiffer()
+    {
+        var commands = new List<MsiHidTransport.Command>();
+        var transport = new MsiHidTransport((_, _) => ["usb-only"],
+            (_, command, _) =>
+            {
+                commands.Add(command);
+                return Task.FromResult(HidOperationResult.Ok(
+                    command.FeatureCode == "00130" ? "HID-CHASSIS-SERIAL" : "001"));
+            });
+
+        HidOperationResult result = await transport.SetNoAckAsync(
+            0x1462, [0x3FA4], "EDID-FACTORY-SERIAL", "00;10", "001", default);
+
+        Assert.Equal(HidOperationState.Success, result.State);
+        Assert.Equal(["00130", "00;10"], commands.Select(c => c.FeatureCode));
+    }
+
+    [Fact]
     public async Task CancellationAfterIdentification_PreventsTheWrite()
     {
         using var cancellation = new CancellationTokenSource();

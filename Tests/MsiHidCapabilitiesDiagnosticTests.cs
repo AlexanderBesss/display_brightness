@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Reflection;
 using DisplayBrightness.Services;
 
 namespace DisplayBrightness.Tests;
@@ -6,7 +7,7 @@ namespace DisplayBrightness.Tests;
 public sealed class MsiHidCapabilitiesDiagnosticTests
 {
     [Fact]
-    public void PrintConnectedMsiHidCapabilities()
+    public async Task PrintConnectedMsiHidCapabilities()
     {
         List<string> paths = MsiHidNative.EnumerateDevicePaths(
             OledCompatibilityRegistry.MsiVendorId,
@@ -27,6 +28,16 @@ public sealed class MsiHidCapabilitiesDiagnosticTests
                 handle,
                 out HidReportCapabilities? capabilities);
             Console.WriteLine($"Caps success: {success}; {capabilities}");
+            if (success)
+            {
+                var method = typeof(MsiHidTransport).GetMethod(
+                    "ExecuteForPathAsync", BindingFlags.NonPublic | BindingFlags.Static)!;
+                var rawTask = (Task<HidOperationResult>)method.Invoke(null,
+                    [path, MsiProtocol.GetCommand("00130"), false, false, "00130",
+                     MsiProtocol.ReplyVerb, CancellationToken.None])!;
+                HidOperationResult raw = await rawTask;
+                Console.WriteLine($"  Raw GET 00130: state={raw.State} value='{raw.Value}' message={raw.Message}");
+            }
         }
 
         // This is a hardware diagnostic, not a requirement for running the
@@ -65,6 +76,7 @@ public sealed class MsiHidCapabilitiesDiagnosticTests
         var transport = new MsiHidTransport();
         string serial = new MonitorEnumerator().GetExternalMonitors()
             .FirstOrDefault(m => m.HardwareId == "MSI3CD7")?.SerialNumber ?? string.Empty;
+        Console.WriteLine($"Selected MSI display serial: '{serial}'");
 
         string[] codes =
         [

@@ -259,6 +259,7 @@ internal sealed class MsiHidTransport : IMsiHidTransport
                 return HidOperationResult.NotConnected();
 
             HidOperationResult? lastFailure = null;
+            bool identityProbeSucceeded = false;
             var matches = new List<string>();
             foreach (string path in paths)
             {
@@ -274,12 +275,22 @@ internal sealed class MsiHidTransport : IMsiHidTransport
                     lastFailure = result;
                     continue;
                 }
+                identityProbeSucceeded = true;
                 if (string.Equals(serial, result.Value.Trim(), StringComparison.OrdinalIgnoreCase))
                     matches.Add(path);
             }
             if (matches.Count > 1)
                 return HidOperationResult.Fail(
                     "Multiple USB interfaces have this display's serial number. OLED Care is unavailable.");
+            if (matches.Count == 0 && paths.Count == 1 && identityProbeSucceeded)
+            {
+                // Some monitors expose an EDID factory serial through WMI but a
+                // different chassis serial through the MSI HID register. With
+                // exactly one responsive VID/PID candidate there is no device
+                // ambiguity, so use that candidate. Never apply this fallback
+                // when multiple interfaces are present.
+                matches.Add(paths[0]);
+            }
             if (matches.Count == 0)
                 return lastFailure ?? HidOperationResult.NotConnected();
             cancellationToken.ThrowIfCancellationRequested();

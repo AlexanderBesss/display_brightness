@@ -323,10 +323,8 @@ public sealed class DisplayRecoveryTests
             Save?.Invoke();
             Settings = new(value);
         }
-        public Dictionary<string, OledPanelProtectHistory> LoadOledPanelProtectHistory() => new();
-        public void SaveOledPanelProtectHistory(Dictionary<string, OledPanelProtectHistory> value) { }
-        public Dictionary<string, OledPanelProtectNotification> LoadOledPanelProtectNotifications() => new();
-        public void SaveOledPanelProtectNotifications(Dictionary<string, OledPanelProtectNotification> value) { }
+        public Dictionary<string, OledPanelProtectState> LoadOledPanelProtectState() => new();
+        public void SaveOledPanelProtectState(Dictionary<string, OledPanelProtectState> value) { }
         public bool GetStartOnStartup() => false;
         public bool SetStartOnStartup(bool enabled) => true;
     }

@@ -4,6 +4,12 @@ namespace DisplayBrightness.Services;
 
 public sealed class OledCareService : IOledCareService
 {
+    // The monitor continues its on-device routine for several minutes after
+    // the command is accepted. Seven minutes is the observed duration on the
+    // supported MSI OLED panel.
+    public static readonly TimeSpan PanelProtectRoutineDuration =
+        TimeSpan.FromMinutes(7);
+
     private readonly IMsiHidTransport _transport;
     private readonly Func<MonitorInfo, int?> _usageHoursReader;
 

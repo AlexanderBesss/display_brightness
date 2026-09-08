@@ -17,8 +17,7 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly SemaphoreSlim _displayIo = new(1, 1);
     private readonly CancellationTokenSource _lifetime = new();
     private Dictionary<string, int> _savedSettings = new(StringComparer.OrdinalIgnoreCase);
-    private Dictionary<string, OledPanelProtectHistory> _oledPanelProtectHistory = new(StringComparer.OrdinalIgnoreCase);
-    private Dictionary<string, OledPanelProtectNotification> _oledPanelProtectNotifications = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, OledPanelProtectState> _oledPanelProtectState = new(StringComparer.OrdinalIgnoreCase);
     private DateTimeOffset _lastAutomaticRefreshAtUtc;
     private Task _refreshTask = Task.CompletedTask;
     private Task _persistenceTask = Task.CompletedTask;
@@ -88,14 +87,12 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
         {
             var stored = await Task.Run(() => (
                 Settings: _storageService.LoadSettings(),
-                History: _storageService.LoadOledPanelProtectHistory(),
-                Notifications: _storageService.LoadOledPanelProtectNotifications(),
+                OledState: _storageService.LoadOledPanelProtectState(),
                 Startup: _storageService.GetStartOnStartup()));
             if (_isDisposed)
                 return;
             _savedSettings = stored.Settings;
-            _oledPanelProtectHistory = stored.History;
-            _oledPanelProtectNotifications = stored.Notifications;
+            _oledPanelProtectState = stored.OledState;
             _startOnStartup = stored.Startup;
             OnPropertyChanged(nameof(StartOnStartup));
         }
@@ -275,8 +272,9 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
             }
             else
             {
-                _oledPanelProtectHistory.TryGetValue(monitor.DevicePath, out var history);
-                _oledPanelProtectNotifications.TryGetValue(monitor.DevicePath, out var notification);
+                _oledPanelProtectState.TryGetValue(monitor.DevicePath, out var oledState);
+                OledPanelProtectHistory? history = oledState?.History;
+                OledPanelProtectNotification? notification = oledState?.Notification;
                 vm = new MonitorSliderViewModel(monitor, reading.Brightness,
                     value => CommitBrightnessAsync(monitor, value), _oledCareService, _dialogService,
                     history, entry => SaveOledPanelProtectHistory(monitor, entry), _timeProvider,
@@ -304,18 +302,36 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
     private void SaveOledPanelProtectHistory(MonitorInfo monitor, OledPanelProtectHistory history)
     {
         if (string.IsNullOrWhiteSpace(monitor.DevicePath)) return;
-        _oledPanelProtectHistory[monitor.DevicePath] = history;
-        var snapshot = new Dictionary<string, OledPanelProtectHistory>(_oledPanelProtectHistory, StringComparer.OrdinalIgnoreCase);
-        _ = QueuePersistence(() => _storageService.SaveOledPanelProtectHistory(snapshot));
+        OledPanelProtectState state = _oledPanelProtectState.TryGetValue(
+            monitor.DevicePath,
+            out var existing)
+            ? existing
+            : new OledPanelProtectState(null, null);
+        _oledPanelProtectState[monitor.DevicePath] = state with { History = history };
+        var snapshot = new Dictionary<string, OledPanelProtectState>(
+            _oledPanelProtectState, StringComparer.OrdinalIgnoreCase);
+        _ = QueuePersistence(() => _storageService.SaveOledPanelProtectState(snapshot));
     }
 
     private void SaveOledPanelProtectNotification(MonitorInfo monitor, OledPanelProtectNotification? notification)
     {
         if (string.IsNullOrWhiteSpace(monitor.DevicePath)) return;
-        if (notification == null) _oledPanelProtectNotifications.Remove(monitor.DevicePath);
-        else _oledPanelProtectNotifications[monitor.DevicePath] = notification;
-        var snapshot = new Dictionary<string, OledPanelProtectNotification>(_oledPanelProtectNotifications, StringComparer.OrdinalIgnoreCase);
-        _ = QueuePersistence(() => _storageService.SaveOledPanelProtectNotifications(snapshot));
+        if (_oledPanelProtectState.TryGetValue(monitor.DevicePath, out var state))
+        {
+            OledPanelProtectState updated = state with { Notification = notification };
+            if (updated.History == null && updated.Notification == null)
+                _oledPanelProtectState.Remove(monitor.DevicePath);
+            else
+                _oledPanelProtectState[monitor.DevicePath] = updated;
+        }
+        else if (notification != null)
+        {
+            _oledPanelProtectState[monitor.DevicePath] =
+                new OledPanelProtectState(null, notification);
+        }
+        var snapshot = new Dictionary<string, OledPanelProtectState>(
+            _oledPanelProtectState, StringComparer.OrdinalIgnoreCase);
+        _ = QueuePersistence(() => _storageService.SaveOledPanelProtectState(snapshot));
     }
 
     private Task QueuePersistence(Action save) => _persistenceTask = PersistAfterAsync(_persistenceTask, save);

@@ -16,16 +16,13 @@ public sealed class StorageServiceTests
     }
 
     [Fact]
-    public void OledHistoryPath_IsNextToExecutable()
+    public void OledCareStatePath_IsNextToExecutable()
     {
         const string executableDirectory = @"C:\Tools\Brightness";
 
         Assert.Equal(
-            @"C:\Tools\Brightness\oled-care-history.json",
-            StorageService.GetOledHistoryPath(executableDirectory));
-        Assert.Equal(
-            @"C:\Tools\Brightness\oled-care-notifications.json",
-            StorageService.GetOledNotificationPath(executableDirectory));
+            @"C:\Tools\Brightness\oled-care-state.json",
+            StorageService.GetOledCareStatePath(executableDirectory));
     }
 
     [Fact]
@@ -56,100 +53,88 @@ public sealed class StorageServiceTests
     }
 
     [Fact]
-    public void OledHistory_RoundTripsWithNormalizedKeysAndValues()
+    public void OledState_RoundTripsWithNormalizedKeysAndValues()
     {
         string testDirectory = CreateTestDirectory();
         string settingsPath = Path.Combine(testDirectory, "settings.json");
-        var timestamp = new DateTimeOffset(2026, 9, 1, 12, 30, 0, TimeSpan.FromHours(3));
-
-        try
-        {
-            var storage = new StorageService(settingsPath);
-            storage.SaveOledPanelProtectHistory(new Dictionary<
-                string,
-                OledPanelProtectHistory>
-            {
-                [@"MONITOR\MSI3CD7\INSTANCE"] = new(timestamp, 10250),
-                [@"MONITOR\MSI3CD7\INVALID"] = new(timestamp, -1)
-            });
-
-            Dictionary<string, OledPanelProtectHistory> history =
-                storage.LoadOledPanelProtectHistory();
-
-            OledPanelProtectHistory saved =
-                history[@"monitor\msi3cd7\instance"];
-            Assert.Equal(timestamp.ToUniversalTime(), saved.LastStartedAtUtc);
-            Assert.Equal(10250, saved.TotalUsageHoursAtStart);
-            Assert.Null(history[@"monitor\msi3cd7\invalid"].TotalUsageHoursAtStart);
-        }
-        finally
-        {
-            Directory.Delete(testDirectory, recursive: true);
-        }
-    }
-
-    [Fact]
-    public void LoadOledHistory_ReturnsEmptyForMissingOrMalformedFile()
-    {
-        string testDirectory = CreateTestDirectory();
-        string settingsPath = Path.Combine(testDirectory, "settings.json");
-
-        try
-        {
-            var storage = new StorageService(settingsPath);
-            Assert.Empty(storage.LoadOledPanelProtectHistory());
-
-            File.WriteAllText(
-                Path.Combine(testDirectory, "oled-care-history.json"),
-                "{ definitely not valid JSON");
-
-            Assert.Empty(storage.LoadOledPanelProtectHistory());
-        }
-        finally
-        {
-            Directory.Delete(testDirectory, recursive: true);
-        }
-    }
-
-    [Fact]
-    public void OledNotifications_RoundTripAndDiscardInvalidEntries()
-    {
-        string testDirectory = CreateTestDirectory();
-        string settingsPath = Path.Combine(testDirectory, "settings.json");
-        var timestamp = new DateTimeOffset(
+        var startedAt = new DateTimeOffset(
+            2026, 9, 1, 12, 30, 0, TimeSpan.FromHours(3));
+        var observedAt = new DateTimeOffset(
             2026, 9, 1, 17, 30, 0, TimeSpan.FromHours(3));
 
         try
         {
             var storage = new StorageService(settingsPath);
-            storage.SaveOledPanelProtectNotifications(new Dictionary<
+            storage.SaveOledPanelProtectState(new Dictionary<
                 string,
-                OledPanelProtectNotification>
+                OledPanelProtectState>
             {
                 [@"MONITOR\MSI3CD7\INSTANCE"] = new(
-                    OledPanelProtectEventType.ShortTimeWithLater,
-                    timestamp,
-                    10258),
-                [@"MONITOR\MSI3CD7\NONE"] = new(
-                    OledPanelProtectEventType.None,
-                    timestamp,
-                    10258)
+                    new OledPanelProtectHistory(startedAt, 10250),
+                    new OledPanelProtectNotification(
+                        OledPanelProtectEventType.ShortTimeWithLater,
+                        observedAt,
+                        10258)),
+                [@"MONITOR\MSI3CD7\INVALID"] = new(
+                    new OledPanelProtectHistory(startedAt, -1),
+                    new OledPanelProtectNotification(
+                        OledPanelProtectEventType.None,
+                        observedAt,
+                        10258)),
+                [@"MONITOR\MSI3CD7\EMPTY"] = new(
+                    null,
+                    new OledPanelProtectNotification(
+                        OledPanelProtectEventType.None,
+                        observedAt,
+                        10258))
             });
 
-            Dictionary<string, OledPanelProtectNotification> notifications =
-                storage.LoadOledPanelProtectNotifications();
+            Dictionary<string, OledPanelProtectState> state =
+                storage.LoadOledPanelProtectState();
 
-            OledPanelProtectNotification saved =
-                notifications[@"monitor\msi3cd7\instance"];
+            OledPanelProtectState saved =
+                state[@"monitor\msi3cd7\instance"];
+            Assert.Equal(startedAt.ToUniversalTime(), saved.History!.LastStartedAtUtc);
+            Assert.Equal(10250, saved.History.TotalUsageHoursAtStart);
             Assert.Equal(
                 OledPanelProtectEventType.ShortTimeWithLater,
-                saved.Type);
-            Assert.Equal(timestamp.ToUniversalTime(), saved.FirstObservedAtUtc);
-            Assert.Equal(10258, saved.TotalUsageHoursAtObservation);
+                saved.Notification!.Type);
+            Assert.Equal(
+                observedAt.ToUniversalTime(),
+                saved.Notification.FirstObservedAtUtc);
+            Assert.Equal(10258, saved.Notification.TotalUsageHoursAtObservation);
+
+            OledPanelProtectState invalid =
+                state[@"monitor\msi3cd7\invalid"];
+            Assert.Null(invalid.History?.TotalUsageHoursAtStart);
+            Assert.Null(invalid.Notification);
             Assert.DoesNotContain(
-                @"monitor\msi3cd7\none",
-                notifications.Keys,
+                @"monitor\msi3cd7\empty",
+                state.Keys,
                 StringComparer.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(testDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void LoadOledState_ReturnsEmptyForMissingOrMalformedFile()
+    {
+        string testDirectory = CreateTestDirectory();
+        string settingsPath = Path.Combine(testDirectory, "settings.json");
+
+        try
+        {
+            var storage = new StorageService(settingsPath);
+            Assert.Empty(storage.LoadOledPanelProtectState());
+
+            File.WriteAllText(
+                Path.Combine(testDirectory, "oled-care-state.json"),
+                "{ definitely not valid JSON");
+
+            Assert.Empty(storage.LoadOledPanelProtectState());
         }
         finally
         {

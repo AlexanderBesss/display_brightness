@@ -198,9 +198,7 @@ public sealed class OledCareService : IOledCareService
             cancellationToken).ConfigureAwait(false);
 
         return result.State == HidOperationState.Success
-            ? new PixelRefreshResult(
-                true,
-                "Panel protect command sent. A warning is shown on the display; do not look at it directly.")
+            ? new PixelRefreshResult(true, string.Empty)
             : new PixelRefreshResult(false, result.Message);
     }
 

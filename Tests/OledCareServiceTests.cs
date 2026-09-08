@@ -180,6 +180,7 @@ public sealed class OledCareServiceTests
         PixelRefreshResult result = await service.StartPixelRefreshAsync(CreateMsiMonitor());
 
         Assert.True(result.Started);
+        Assert.Empty(result.Message);
         Assert.Equal(OledCompatibilityRegistry.PanelProtectCode, transport.LastNoAckSetCode);
         Assert.Equal("001", transport.LastNoAckSetValue);
         Assert.Equal(1, transport.NoAckSetCount);

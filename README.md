@@ -41,12 +41,15 @@ notification is latched locally until Panel Protect is started from this app.
 OLED Care matches the display's EDID serial number to the USB monitor's serial
 number before reading status or sending Panel Protect. Missing, duplicate, or
 unmatched identities disable OLED control with an explanation; the app never
-chooses a USB monitor by model alone. Displays with unreadable brightness stay
-disabled until a successful read. A failed write on a known controllable display
-gets one retry and leaves the controls available for another adjustment.
+chooses a USB monitor by model alone. A display that is still connected but
+returns an unreadable brightness keeps its last known value and controls through
+one failed read, and is disabled only when a second consecutive read fails. A
+failed write on a known controllable display gets one retry and leaves the
+controls available for another adjustment.
 Precision touchpad scrolling preserves fractional wheel movement, and rapid
 changes are combined and paced. Display changes trigger a debounced refresh;
-periodic background checks recover displays even while the popup stays hidden.
+periodic background checks recover displays even while the popup stays hidden,
+and opening the popup re-reads a display that currently looks unusable.
 
 ## Build
 

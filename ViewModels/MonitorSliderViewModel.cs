@@ -9,8 +9,12 @@ namespace DisplayBrightness.ViewModels;
 public class MonitorSliderViewModel : ViewModelBase, IDisposable
 {
     private static readonly TimeSpan MinimumBrightnessWriteInterval = TimeSpan.FromMilliseconds(100);
+    private const int FailedReadsBeforeUnavailable = 2;
+    private const string UnavailableMessage =
+        "Brightness unavailable. Check the display connection and brightness-control support, then refresh.";
     private long? _lastBrightnessWriteTimestamp;
     private int _wheelRemainder;
+    private int _failedReads;
     private readonly MonitorInfo _monitor;
     private readonly Func<int, Task<bool>> _commitBrightness;
     private int? _pendingBrightness;
@@ -190,7 +194,7 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
         _brightnessValue = Math.Clamp(initialBrightness ?? 0, 0, 100);
         _committedBrightness = (int)_brightnessValue;
         if (!initialBrightness.HasValue)
-            BrightnessStatusText = "Brightness unavailable. Check the display connection and brightness-control support, then refresh.";
+            BrightnessStatusText = UnavailableMessage;
         _commitBrightness = commitBrightness;
         _oledCareService = oledCareService;
         _dialogService = dialogService;
@@ -349,6 +353,7 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
         _connectionVersion++;
         _pendingBrightness = null;
         _wheelRemainder = 0;
+        _failedReads = 0;
         BrightnessRevision++;
         SetBrightnessAvailability(false, "Reconnecting display…");
         OnPropertyChanged(nameof(CanRunPixelRefresh));
@@ -370,8 +375,7 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
             BrightnessValue = brightness ?? _committedBrightness;
             if (brightness.HasValue)
                 _committedBrightness = (int)BrightnessValue;
-            SetBrightnessAvailability(brightness.HasValue, brightness.HasValue ? string.Empty :
-                "Brightness unavailable. Check the display connection and brightness-control support, then refresh.");
+            ApplyReadAvailability(brightness, reconnecting);
         }
         OnPropertyChanged(nameof(FriendlyName));
         OnPropertyChanged(nameof(ModelName));
@@ -379,6 +383,34 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(HasRefreshRate));
         if (ShowOledCare && !IsOledBusy)
             AsyncHelper.FireAndForget(() => RefreshOledStatusAsync(_lifetimeCancellation.Token), "OLED status refresh");
+    }
+
+    private void ApplyReadAvailability(int? brightness, bool reconnecting)
+    {
+        if (brightness.HasValue)
+        {
+            _failedReads = 0;
+            SetBrightnessAvailability(true, string.Empty);
+            return;
+        }
+
+        // A display that is still enumerated but unreadable has usually just
+        // timed out on DDC/CI. Keep the last known value and the controls through
+        // one failure, so a single timeout cannot take the slider away from a
+        // monitor that was working moments earlier. The counter only counts while
+        // the controls are up; a reconnect or a lost control resets it.
+        if (!reconnecting && CanAdjustBrightness)
+        {
+            _failedReads++;
+            if (_failedReads < FailedReadsBeforeUnavailable)
+            {
+                BrightnessStatusText = "Brightness could not be read. Keeping the last value.";
+                return;
+            }
+        }
+
+        _failedReads = 0;
+        SetBrightnessAvailability(false, UnavailableMessage);
     }
 
     private void SetBrightnessAvailability(bool available, string message)

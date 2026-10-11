@@ -4,6 +4,7 @@
 $ErrorActionPreference = "Stop"
 $ProjectDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $PublishDir = Join-Path $ProjectDir "publish"
+$BuildSucceeded = $false
 
 try {
     Write-Host "========================================" -ForegroundColor Cyan
@@ -22,6 +23,23 @@ try {
 
     # Clean
     Write-Host "[2/4] Cleaning previous builds..." -ForegroundColor Yellow
+
+    # A running instance built from this folder holds its image open, which makes the
+    # delete below fail. Stop only those instances; an installed copy elsewhere is not
+    # in the way and is left alone.
+    $lockingProcesses = @(Get-CimInstance Win32_Process -Filter "Name='Brightness.exe'" |
+        Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($PublishDir, [System.StringComparison]::OrdinalIgnoreCase) })
+    foreach ($process in $lockingProcesses) {
+        Write-Host "  Stopping running instance (PID $($process.ProcessId)) that locks the build output." -ForegroundColor Yellow
+        # A forced stop is the only option: the app cancels window close to stay in the
+        # tray, so there is no graceful shutdown path to ask for. The shell drops the
+        # icon on its own once the window handle that registered it dies.
+        Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+    if ($lockingProcesses.Count -gt 0) {
+        Start-Sleep -Milliseconds 500
+    }
+
     if (Test-Path $PublishDir) {
         Remove-Item -Recurse -Force $PublishDir
     }
@@ -62,6 +80,8 @@ try {
         $size = [math]::Round($exe.Length / 1MB, 2)
         Write-Host "  Size: ${size} MB" -ForegroundColor Green
     }
+
+    $BuildSucceeded = $true
 }
 catch {
     Write-Host ""
@@ -70,6 +90,10 @@ catch {
     Write-Host "========================================" -ForegroundColor Red
 }
 
-Write-Host ""
-Write-Host "Press any key to exit..." -ForegroundColor Gray
-$null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+if (-not [Console]::IsInputRedirected) {
+    Write-Host ""
+    Write-Host "Press any key to exit..." -ForegroundColor Gray
+    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+}
+
+exit $(if ($BuildSucceeded) { 0 } else { 1 })

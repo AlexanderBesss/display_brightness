@@ -15,7 +15,6 @@ internal sealed class NativeTrayIcon : NativeWindow, IDisposable
     private const uint NifMessage = 0x00000001;
     private const uint NifIcon = 0x00000002;
     private const uint NifTip = 0x00000004;
-    private const uint NifGuid = 0x00000020;
     private const uint NifShowTip = 0x00000080;
     private const uint NotifyIconVersion4 = 4;
     private const int WmApp = 0x8000;
@@ -35,8 +34,12 @@ internal sealed class NativeTrayIcon : NativeWindow, IDisposable
     private const int WheelDelta = 120;
     private const uint RawInputError = uint.MaxValue;
 
-    private static readonly Guid TrayIconGuid =
-        new("1B71E3C2-4F25-4CD8-9767-3E17C9C83B39");
+    // The icon is identified by this window plus a non-zero id. A GUID would
+    // survive the process: if an instance ends without removing the icon, the
+    // shell keeps refusing that GUID for every later instance, and claiming a
+    // replacement GUID makes Windows treat it as a brand new icon and hide it
+    // in the notification-area overflow.
+    private const uint IconId = 1;
 
     private readonly uint _taskbarCreatedMessage;
     private readonly IntPtr _windowHandle;
@@ -116,8 +119,8 @@ internal sealed class NativeTrayIcon : NativeWindow, IDisposable
         {
             Size = (uint)Marshal.SizeOf<NotifyIconIdentifier>(),
             WindowHandle = _windowHandle,
-            Id = 0,
-            Guid = TrayIconGuid
+            Id = IconId,
+            Guid = Guid.Empty
         };
 
         return ShellNotifyIconGetRect(ref identifier, out NativeRect bounds) == 0 &&
@@ -158,7 +161,10 @@ internal sealed class NativeTrayIcon : NativeWindow, IDisposable
 
     internal static bool IsDisplayConfigurationMessage(int message, long eventCode) =>
         message == 0x007E || // WM_DISPLAYCHANGE
-        (message == 0x0219 && eventCode is 0x0007 or 0x0018 or 0x8000 or 0x8004) || // WM_DEVICECHANGE
+        // DBT_DEVICEINTERFACE (0x0018) plus arrival/removal of a volume or device.
+        // DBT_DEVNODES_CHANGED (0x0007) is deliberately excluded: it fires for any
+        // device node change, including audio and USB storage, and is not a display event.
+        (message == 0x0219 && eventCode is 0x0018 or 0x8000 or 0x8004) || // WM_DEVICECHANGE
         (message == 0x0218 && eventCode is 0x0007 or 0x0012); // resume / automatic resume
 
     private static Point GetAnchorPoint(IntPtr messageParameter)
@@ -191,7 +197,10 @@ internal sealed class NativeTrayIcon : NativeWindow, IDisposable
     {
         NotifyIconData data = CreateIconData();
         if (!ShellNotifyIcon(NimAdd, ref data))
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to create tray icon.");
+        {
+            int error = Marshal.GetLastWin32Error();
+            throw new Win32Exception(error, $"Failed to create tray icon (Win32 error {error}).");
+        }
 
         data.VersionOrTimeout = NotifyIconVersion4;
         if (!ShellNotifyIcon(NimSetVersion, ref data))
@@ -315,14 +324,14 @@ internal sealed class NativeTrayIcon : NativeWindow, IDisposable
         {
             Size = (uint)Marshal.SizeOf<NotifyIconData>(),
             WindowHandle = _windowHandle,
-            Id = 0,
-            Flags = NifMessage | NifIcon | NifTip | NifGuid | NifShowTip,
+            Id = IconId,
+            Flags = NifMessage | NifIcon | NifTip | NifShowTip,
             CallbackMessage = TrayCallbackMessage,
             IconHandle = _icon.Handle,
             Tip = _tooltip,
             Info = string.Empty,
             InfoTitle = string.Empty,
-            Guid = TrayIconGuid
+            Guid = Guid.Empty
         };
     }
 

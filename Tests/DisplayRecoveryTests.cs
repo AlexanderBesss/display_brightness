@@ -40,7 +40,7 @@ public sealed class DisplayRecoveryTests
 
     [Theory]
     [InlineData(0x007E, 0, true)]
-    [InlineData(0x0219, 7, true)]
+    [InlineData(0x0219, 7, false)]
     [InlineData(0x0219, 0x8000, true)]
     [InlineData(0x0219, 0x8004, true)]
     [InlineData(0x0218, 0x12, true)]
@@ -181,6 +181,127 @@ public sealed class DisplayRecoveryTests
         Assert.Same(row, vm.Monitors.Single());
         Assert.True(vm.CanAdjustBrightness);
         Assert.Equal(70, vm.PrimaryBrightness);
+    }
+
+    [Fact]
+    public async Task ReadTimeout_IsRetriedOnceWhenTheDisplayWasAnsweringBefore()
+    {
+        var display = new FakeDisplay();
+        var time = new AdjustableTime();
+        using var vm = new MainWindowViewModel(
+            display, new FakeStorage(), new NoOled(), new RejectDialog(), time);
+        await vm.InitializationTask;
+        Assert.Equal(50, vm.PrimaryBrightness);
+
+        int attempts = 0;
+        display.Read = _ => Interlocked.Increment(ref attempts) == 1 ? null : 42;
+        time.Now += TimeSpan.FromMinutes(1);
+        await vm.RefreshIfStaleAsync();
+        Assert.Equal(2, attempts);
+        Assert.Equal(42, vm.PrimaryBrightness);
+        Assert.True(vm.CanAdjustBrightness);
+    }
+
+    [Fact]
+    public async Task NeverReadableDisplay_IsNotRetriedOnEveryCycle()
+    {
+        int attempts = 0;
+        var display = new FakeDisplay { Read = _ => { Interlocked.Increment(ref attempts); return null; } };
+        var time = new AdjustableTime();
+        using var vm = new MainWindowViewModel(
+            display, new FakeStorage(), new NoOled(), new RejectDialog(), time);
+        await vm.InitializationTask;
+        Assert.Equal(1, attempts);
+
+        time.Now += TimeSpan.FromMinutes(1);
+        await vm.RefreshIfStaleAsync();
+        Assert.Equal(2, attempts);
+        Assert.False(vm.CanAdjustBrightness);
+    }
+
+    [Fact]
+    public async Task TransientReadFailure_KeepsControlsUntilASecondReadAlsoFails()
+    {
+        var display = new FakeDisplay();
+        var time = new AdjustableTime();
+        using var vm = new MainWindowViewModel(
+            display, new FakeStorage(), new NoOled(), new RejectDialog(), time);
+        await vm.InitializationTask;
+        var row = vm.Monitors.Single();
+
+        display.Read = _ => null;
+        time.Now += TimeSpan.FromMinutes(1);
+        await vm.RefreshIfStaleAsync();
+        Assert.True(row.CanAdjustBrightness);
+        Assert.Equal("50%", row.BrightnessText);
+        Assert.Contains("could not be read", row.BrightnessStatusText);
+
+        time.Now += TimeSpan.FromMinutes(1);
+        await vm.RefreshIfStaleAsync();
+        Assert.False(row.CanAdjustBrightness);
+        Assert.Contains("Brightness unavailable", row.BrightnessStatusText);
+
+        display.Read = _ => 70;
+        await vm.RefreshAsync();
+        Assert.True(row.CanAdjustBrightness);
+        Assert.Equal(70, vm.PrimaryBrightness);
+    }
+
+    [Fact]
+    public async Task TrayOpen_ForcesAReReadWhenNothingIsControllable()
+    {
+        var display = new FakeDisplay { Read = _ => null };
+        var time = new AdjustableTime();
+        using var vm = new MainWindowViewModel(
+            display, new FakeStorage(), new NoOled(), new RejectDialog(), time);
+        await vm.InitializationTask;
+        Assert.False(vm.CanAdjustBrightness);
+        int reads = display.Enumerations;
+
+        display.Read = _ => 60;
+        await vm.RefreshIfStaleAsync();
+        Assert.Equal(reads, display.Enumerations);
+        Assert.False(vm.CanAdjustBrightness);
+
+        await vm.RefreshIfStaleAsync(forceWhenUnavailable: true);
+        Assert.True(vm.CanAdjustBrightness);
+        Assert.Equal(60, vm.PrimaryBrightness);
+    }
+
+    [Fact]
+    public async Task TrayOpen_DoesNotReReadWhenADisplayIsAlreadyControllable()
+    {
+        var display = new FakeDisplay();
+        var time = new AdjustableTime();
+        using var vm = new MainWindowViewModel(
+            display, new FakeStorage(), new NoOled(), new RejectDialog(), time);
+        await vm.InitializationTask;
+        int reads = display.Enumerations;
+
+        await vm.RefreshIfStaleAsync(forceWhenUnavailable: true);
+
+        Assert.Equal(reads, display.Enumerations);
+    }
+
+    [Fact]
+    public async Task TrayOpen_ForcedReReadIsFlooredWhileNothingIsControllable()
+    {
+        var display = new FakeDisplay { Read = _ => null };
+        var time = new AdjustableTime();
+        using var vm = new MainWindowViewModel(
+            display, new FakeStorage(), new NoOled(), new RejectDialog(), time);
+        await vm.InitializationTask;
+        int reads = display.Enumerations;
+
+        await vm.RefreshIfStaleAsync(forceWhenUnavailable: true);
+        Assert.Equal(reads + 1, display.Enumerations);
+
+        await vm.RefreshIfStaleAsync(forceWhenUnavailable: true);
+        Assert.Equal(reads + 1, display.Enumerations);
+
+        time.Now += TimeSpan.FromSeconds(5);
+        await vm.RefreshIfStaleAsync(forceWhenUnavailable: true);
+        Assert.Equal(reads + 2, display.Enumerations);
     }
 
     [Fact]

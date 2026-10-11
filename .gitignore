@@ -14,3 +14,7 @@ oled-care-notifications.json
 .vs/
 .ipynb_checkpoints
 opencode.json
+
+# Agent/harness artifacts (machine-local diagnostics, never project content)
+.acl-reports/
+browser-screenshots/

@@ -9,6 +9,8 @@ namespace DisplayBrightness.ViewModels;
 public class MainWindowViewModel : ViewModelBase, IDisposable
 {
     private static readonly TimeSpan AutomaticRefreshInterval = TimeSpan.FromMinutes(1);
+    private static readonly TimeSpan ForcedRefreshFloor = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan BrightnessReadRetryDelay = TimeSpan.FromMilliseconds(150);
     private readonly IDisplayService _displayService;
     private readonly IStorageService _storageService;
     private readonly IOledCareService _oledCareService;
@@ -19,6 +21,7 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
     private Dictionary<string, int> _savedSettings = new(StringComparer.OrdinalIgnoreCase);
     private Dictionary<string, OledPanelProtectState> _oledPanelProtectState = new(StringComparer.OrdinalIgnoreCase);
     private DateTimeOffset _lastAutomaticRefreshAtUtc;
+    private DateTimeOffset _lastForcedRefreshAtUtc = DateTimeOffset.MinValue;
     private Task _refreshTask = Task.CompletedTask;
     private Task _persistenceTask = Task.CompletedTask;
     private bool _isRefreshRunning;
@@ -114,13 +117,28 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
             await RequestRefreshAsync();
     }
 
-    internal async Task RefreshIfStaleAsync()
+    internal async Task RefreshIfStaleAsync(bool forceWhenUnavailable = false)
     {
         await InitializationTask;
-        TimeSpan elapsed = _timeProvider.GetUtcNow() - _lastAutomaticRefreshAtUtc;
-        if (!_isDisposed && !_isRefreshRunning &&
-            (elapsed < TimeSpan.Zero || elapsed >= AutomaticRefreshInterval))
+        if (_isDisposed || _isRefreshRunning)
+            return;
+
+        DateTimeOffset now = _timeProvider.GetUtcNow();
+        TimeSpan elapsed = now - _lastAutomaticRefreshAtUtc;
+        bool isStale = elapsed < TimeSpan.Zero || elapsed >= AutomaticRefreshInterval;
+
+        // Opening the popup is an explicit request for control, so a display that
+        // currently looks unusable is re-read even inside the throttle window. The
+        // floor keeps that from turning every click into a full DDC/CI sweep when a
+        // monitor is permanently unreadable.
+        bool retryUnavailable = forceWhenUnavailable && !CanAdjustBrightness &&
+            now - _lastForcedRefreshAtUtc >= ForcedRefreshFloor;
+        if (isStale || retryUnavailable)
+        {
+            if (retryUnavailable)
+                _lastForcedRefreshAtUtc = now;
             await RequestRefreshAsync();
+        }
     }
 
     internal async Task HandleDisplayChangeAsync(TimeSpan? debounce = null)
@@ -199,10 +217,19 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
 
     private async Task<List<MonitorReading>> ReadMonitorsAsync()
     {
+        // Snapshot on the calling (UI) thread: the read loop below runs on a worker
+        // thread and must not walk a collection the UI thread mutates.
+        HashSet<string> retryOnFailure = new(StringComparer.OrdinalIgnoreCase);
+        foreach (MonitorSliderViewModel monitor in Monitors)
+        {
+            if (monitor.CanAdjustBrightness)
+                retryOnFailure.Add(monitor.Monitor.DevicePath);
+        }
+
         await _displayIo.WaitAsync(_lifetime.Token);
         try
         {
-            return await Task.Run(() =>
+            return await Task.Run(async () =>
             {
                 var readings = new List<MonitorReading>();
                 foreach (MonitorInfo monitor in _displayService.GetExternalMonitors())
@@ -211,10 +238,21 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
                     int? brightness = null;
                     try { brightness = _displayService.GetBrightness(monitor); }
                     catch { }
+                    if (!brightness.HasValue && retryOnFailure.Contains(monitor.DevicePath))
+                    {
+                        // A DDC/CI read can time out on a panel that is waking or
+                        // retraining its link. One paced retry keeps a transient
+                        // timeout from taking control away from a display that was
+                        // answering a moment ago. A display that has never answered
+                        // is not retried, so it does not pay the delay every cycle.
+                        await Task.Delay(BrightnessReadRetryDelay, _lifetime.Token);
+                        try { brightness = _displayService.GetBrightness(monitor); }
+                        catch { }
+                    }
                     readings.Add(new MonitorReading(monitor, brightness));
                 }
                 return readings;
-            });
+            }, _lifetime.Token);
         }
         finally { _displayIo.Release(); }
     }

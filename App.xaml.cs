@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Diagnostics;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -16,6 +17,7 @@ public partial class App : System.Windows.Application
     private const int BrightnessStep = 2;
     private const string StartupArgument = "--startup";
 
+    private const long LogSoftLimitBytes = 256 * 1024;
     private NativeTrayIcon? _trayIcon;
     private System.Windows.Controls.ContextMenu? _trayMenu;
     private MainWindow? _mainWindow;
@@ -26,6 +28,8 @@ public partial class App : System.Windows.Application
 
     private void App_OnStartup(object sender, StartupEventArgs e)
     {
+        LogStartupEvent($"startup args=[{string.Join(' ', e.Args)}]");
+        Exit += (_, _) => LogStartupEvent("Application.Exit");
         try
         {
             bool startHidden = e.Args.Any(argument => string.Equals(
@@ -33,12 +37,45 @@ public partial class App : System.Windows.Application
                 StartupArgument,
                 StringComparison.OrdinalIgnoreCase));
             StartApp(startHidden);
+            LogStartupEvent($"StartApp completed (startHidden={startHidden})");
         }
         catch (Exception ex)
         {
+            WriteStartupError(ex);
             System.Windows.MessageBox.Show($"Failed to start Brightness:\n\n{ex.Message}",
                 "Brightness — Startup Error", MessageBoxButton.OK, MessageBoxImage.Error);
             Shutdown();
+        }
+    }
+
+    private static void LogStartupEvent(string message) =>
+        AppendToLog("startup-trace.log", $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {message}");
+
+    private static void WriteStartupError(Exception exception) =>
+        AppendToLog(
+            "startup-error.log",
+            $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {exception.GetType().Name}: {exception.Message}" +
+            $"{Environment.NewLine}{exception.StackTrace}{Environment.NewLine}{Environment.NewLine}");
+
+    // Both logs live under %APPDATA%. A process running at Low integrity cannot write
+    // there, which is one of the cases these logs exist to record; the write then fails
+    // quietly and the UI is the only remaining signal.
+    private static void AppendToLog(string fileName, string text)
+    {
+        try
+        {
+            string directory = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Brightness");
+            Directory.CreateDirectory(directory);
+            string path = Path.Combine(directory, fileName);
+            // FileInfo.Length throws when the file does not exist yet, so check first.
+            if (File.Exists(path) && new FileInfo(path).Length > LogSoftLimitBytes)
+                File.WriteAllText(path, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} log trimmed{Environment.NewLine}");
+            File.AppendAllText(path, text + Environment.NewLine);
+        }
+        catch
+        {
+            // Diagnostics must never interfere with startup.
         }
     }
 
@@ -48,18 +85,38 @@ public partial class App : System.Windows.Application
         MainWindow = _mainWindow;
 
         var viewModel = (MainWindowViewModel)_mainWindow.DataContext;
-        _trayIcon = new NativeTrayIcon(
-            TrayBrightnessIcon.Create(viewModel.PrimaryBrightness),
-            GetTrayText(viewModel.PrimaryBrightness));
 
-        _trayIcon.MouseWheel += detents =>
-            QueueBrightnessAdjustment(viewModel, detents);
-        _trayIcon.IsWheelEnabled = viewModel.CanAdjustBrightness;
-        _trayIcon.DisplayConfigurationChanged += () => AsyncHelper.FireAndForget(
-            () => viewModel.HandleDisplayChangeAsync(), "display configuration change");
+        // The shell can refuse the icon, for example when it cannot open this
+        // process to copy the icon handle. That costs the tray affordance only,
+        // so keep the window on screen instead of refusing to start.
+        bool trayAvailable;
+        try
+        {
+            _trayIcon = new NativeTrayIcon(
+                TrayBrightnessIcon.Create(viewModel.PrimaryBrightness),
+                GetTrayText(viewModel.PrimaryBrightness));
+            trayAvailable = true;
+        }
+        catch (Exception ex)
+        {
+            LogStartupEvent($"tray icon unavailable: {ex.GetType().Name}: {ex.Message}");
+            trayAvailable = false;
+            startHidden = false;
+        }
+
+        if (trayAvailable)
+        {
+            NativeTrayIcon tray = _trayIcon!;
+            tray.MouseWheel += detents =>
+                QueueBrightnessAdjustment(viewModel, detents);
+            tray.IsWheelEnabled = viewModel.CanAdjustBrightness;
+            tray.DisplayConfigurationChanged += () => AsyncHelper.FireAndForget(
+                () => viewModel.HandleDisplayChangeAsync(), "display configuration change");
+        }
+
         _displayRefreshTimer = new DispatcherTimer(
             TimeSpan.FromSeconds(30), DispatcherPriority.Background,
-            (_, _) => AsyncHelper.FireAndForget(viewModel.RefreshIfStaleAsync, "background display recovery"),
+            (_, _) => AsyncHelper.FireAndForget(() => viewModel.RefreshIfStaleAsync(), "background display recovery"),
             Dispatcher);
         _displayRefreshTimer.Start();
 
@@ -91,18 +148,22 @@ public partial class App : System.Windows.Application
                 DispatcherPriority.Background);
         };
 
-        _trayIcon.LeftClick += anchorPoint =>
+        if (trayAvailable)
         {
-            if (_trayMenu != null)
-                _trayMenu.IsOpen = false;
+            NativeTrayIcon tray = _trayIcon!;
+            tray.LeftClick += anchorPoint =>
+            {
+                if (_trayMenu != null)
+                    _trayMenu.IsOpen = false;
 
-            ToggleMainWindow(anchorPoint);
-        };
-        _trayIcon.RightClick += ShowTrayMenu;
+                ToggleMainWindow(anchorPoint);
+            };
+            tray.RightClick += ShowTrayMenu;
+        }
 
         _mainWindow.Closing += (_, e) =>
         {
-            if (!_isExiting)
+            if (!_isExiting && _trayIcon != null)
             {
                 e.Cancel = true;
                 _mainWindow!.Hide();
@@ -111,7 +172,7 @@ public partial class App : System.Windows.Application
 
         _mainWindow.Closed += (_, _) =>
         {
-            if (_isExiting)
+            if (_isExiting || _trayIcon == null)
                 Shutdown();
         };
 
@@ -140,7 +201,7 @@ public partial class App : System.Windows.Application
         if (_mainWindow.DataContext is MainWindowViewModel viewModel)
         {
             AsyncHelper.FireAndForget(
-                viewModel.RefreshIfStaleAsync,
+                () => viewModel.RefreshIfStaleAsync(forceWhenUnavailable: true),
                 "tray display refresh");
         }
     }

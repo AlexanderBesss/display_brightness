@@ -7,6 +7,10 @@ public class MonitorEnumerator
 {
     private const uint MaxDisplayDevices = 16;
 
+    // EnumDisplayDevices flag: report each child's DeviceID as its device
+    // interface path instead of a raw instance id.
+    private const uint EddGetDeviceInterfaceName = 1;
+
     public List<MonitorInfo> GetExternalMonitors()
     {
         var monitors = Enumerate();
@@ -74,7 +78,14 @@ public class MonitorEnumerator
                     return true;
 
                 var monitorDeviceName = miex.szDevice.TrimEnd('\0');
-                deviceMap.TryGetValue(monitorDeviceName, out var info);
+                var info = deviceMap.TryGetValue(
+                    monitorDeviceName,
+                    out MonitorDeviceDescription? description)
+                    ? description
+                    : new MonitorDeviceDescription(
+                        string.Empty,
+                        string.Empty,
+                        monitorDeviceName);
                 var monitor = MonitorInfoParser.CreateMonitorFromEnumMonitors(
                     monitorDeviceName, info);
                 monitor.RefreshRateHz = DisplayInterop.GetDeviceRefreshRateHz(
@@ -96,90 +107,99 @@ public class MonitorEnumerator
         return monitors;
     }
 
-    private static Dictionary<string, (string deviceString, string deviceId, string deviceName)>
-        BuildDeviceNameMap()
+    /// <summary>
+    /// Maps each GDI device name (<c>\\.\DISPLAYn</c>) to the monitor identity
+    /// behind it, so an EnumDisplayMonitors hit can be matched to its instance id.
+    /// </summary>
+    private static Dictionary<string, MonitorDeviceDescription> BuildDeviceNameMap()
     {
-        var map = new Dictionary<string, (string, string, string)>(
+        var map = new Dictionary<string, MonitorDeviceDescription>(
             StringComparer.OrdinalIgnoreCase);
 
-        // First, try the standard approach: enumerate GPUs, then their monitors
-        for (uint i = 0; i < MaxDisplayDevices; i++)
-        {
-            var dd = CreateDisplayDevice();
+        // The standard layout: enumerate GPUs, then the monitors under each GPU.
+        AddMonitorsAttachedToAdapters(map);
 
-            if (!DisplayInterop.EnumDisplayDevicesW(null, i, ref dd, 0))
-                break;
-
-            var gpuName = dd.DeviceName.TrimEnd('\0');
-            // Try to enumerate monitors attached to this device
-            for (uint j = 0; j < MaxDisplayDevices; j++)
-            {
-                var dd2 = CreateDisplayDevice();
-
-                if (!DisplayInterop.EnumDisplayDevicesW(gpuName, j, ref dd2, 1))
-                    break;
-
-                var subName = dd2.DeviceName.TrimEnd('\0');
-                var subString = dd2.DeviceString.TrimEnd('\0');
-                var subId = dd2.DeviceID.TrimEnd('\0');
-                var subFlags = dd2.StateFlags;
-                var subActive = (subFlags & DisplayInterop.DISPLAY_DEVICE_ACTIVE) != 0;
-                var subMirroring = (subFlags & DisplayInterop.DISPLAY_DEVICE_MIRRORING_DRIVER) != 0;
-                if (!subActive)
-                    continue;
-                if (subMirroring)
-                    continue;
-
-                map[subName] = (subString, subId, gpuName);
-                map.TryAdd(gpuName, (subString, subId, gpuName));
-            }
-        }
-
-        // If no monitors found at second level, try treating first-level devices as monitors
+        // Some drivers expose the monitors as first-level devices instead.
         if (map.Count == 0)
-        {
-            for (uint i = 0; i < MaxDisplayDevices; i++)
-            {
-                var dd = CreateDisplayDevice();
-
-                if (!DisplayInterop.EnumDisplayDevicesW(null, i, ref dd, 0))
-                    break;
-
-                var devName = dd.DeviceName.TrimEnd('\0');
-                var devString = dd.DeviceString.TrimEnd('\0');
-                var devId = dd.DeviceID.TrimEnd('\0');
-                var devFlags = dd.StateFlags;
-                var isAttached = (devFlags & DisplayInterop.DISPLAY_DEVICE_ATTACHED_TO_DESKTOP) != 0;
-                if (!isAttached)
-                    continue;
-
-                // Try to get monitor info by enumerating children with EDDI_GET_DEVICE_INTERFACE_NAME
-                var monitorId = devId;
-                var monitorString = devString;
-
-                // Check if this has child devices that are actual monitors
-                for (uint j = 0; j < MaxDisplayDevices; j++)
-                {
-                    var dd2 = CreateDisplayDevice();
-
-                    if (!DisplayInterop.EnumDisplayDevicesW(devName, j, ref dd2, 1)) // EDD_GET_DEVICE_INTERFACE_NAME
-                        continue;
-
-                    var childString = dd2.DeviceString.TrimEnd('\0');
-                    var childId = dd2.DeviceID.TrimEnd('\0');
-                    if (!string.IsNullOrEmpty(childId))
-                    {
-                        monitorId = childId;
-                        if (!string.IsNullOrEmpty(childString))
-                            monitorString = childString;
-                    }
-                }
-
-                map[devName] = (monitorString, monitorId, devName);
-            }
-        }
+            AddFirstLevelMonitors(map);
 
         return map;
+    }
+
+    private static void AddMonitorsAttachedToAdapters(
+        Dictionary<string, MonitorDeviceDescription> map)
+    {
+        for (uint adapterIndex = 0;
+             adapterIndex < MaxDisplayDevices &&
+             TryGetDisplayDevice(null, adapterIndex, 0, out var adapter);
+             adapterIndex++)
+        {
+            string adapterName = adapter.DeviceName.TrimEnd('\0');
+            for (uint monitorIndex = 0;
+                 monitorIndex < MaxDisplayDevices &&
+                 TryGetDisplayDevice(adapterName, monitorIndex, EddGetDeviceInterfaceName, out var monitorDevice);
+                 monitorIndex++)
+            {
+                if (!IsActiveMonitorDevice(monitorDevice))
+                    continue;
+
+                string monitorName = monitorDevice.DeviceName.TrimEnd('\0');
+                var description = new MonitorDeviceDescription(
+                    monitorDevice.DeviceString.TrimEnd('\0'),
+                    monitorDevice.DeviceID.TrimEnd('\0'),
+                    adapterName);
+                map[monitorName] = description;
+                map.TryAdd(adapterName, description);
+            }
+        }
+    }
+
+    private static void AddFirstLevelMonitors(
+        Dictionary<string, MonitorDeviceDescription> map)
+    {
+        for (uint deviceIndex = 0;
+             deviceIndex < MaxDisplayDevices &&
+             TryGetDisplayDevice(null, deviceIndex, 0, out var device);
+             deviceIndex++)
+        {
+            if ((device.StateFlags & DisplayInterop.DISPLAY_DEVICE_ATTACHED_TO_DESKTOP) == 0)
+                continue;
+
+            string deviceName = device.DeviceName.TrimEnd('\0');
+            string monitorId = device.DeviceID.TrimEnd('\0');
+            string monitorString = device.DeviceString.TrimEnd('\0');
+
+            // Prefer the child device's identity when the adapter exposes one.
+            foreach (DisplayInterop.DISPLAY_DEVICEW child in
+                EnumerateAttachedMonitorDevices(deviceName))
+            {
+                string childId = child.DeviceID.TrimEnd('\0');
+                if (childId.Length == 0)
+                    continue;
+
+                monitorId = childId;
+                string childString = child.DeviceString.TrimEnd('\0');
+                if (childString.Length > 0)
+                    monitorString = childString;
+            }
+
+            map[deviceName] = new MonitorDeviceDescription(
+                monitorString,
+                monitorId,
+                deviceName);
+        }
+    }
+
+    private static IEnumerable<DisplayInterop.DISPLAY_DEVICEW> EnumerateAttachedMonitorDevices(
+        string adapterName)
+    {
+        for (uint index = 0;
+             index < MaxDisplayDevices &&
+             TryGetDisplayDevice(adapterName, index, EddGetDeviceInterfaceName, out var device);
+             index++)
+        {
+            yield return device;
+        }
     }
 
     private static List<MonitorInfo> TryGetMonitorsFromDisplayConfig()
@@ -299,54 +319,59 @@ public class MonitorEnumerator
     private static List<MonitorInfo> GetMonitorsViaEnumDisplayDevices()
     {
         var monitors = new List<MonitorInfo>();
-        var gpuDevices = new List<DisplayInterop.DISPLAY_DEVICEW>();
+        var adapters = new List<DisplayInterop.DISPLAY_DEVICEW>();
 
-        for (uint i = 0; i < MaxDisplayDevices; i++)
+        for (uint index = 0;
+             index < MaxDisplayDevices && TryGetDisplayDevice(null, index, 0, out var adapter);
+             index++)
         {
-            var dd = CreateDisplayDevice();
-
-            if (!DisplayInterop.EnumDisplayDevicesW(null, i, ref dd, 0))
-                break;
-
-            if ((dd.StateFlags & DisplayInterop.DISPLAY_DEVICE_ATTACHED_TO_DESKTOP) == 0)
-                continue;
-            if ((dd.StateFlags & DisplayInterop.DISPLAY_DEVICE_MIRRORING_DRIVER) != 0)
-                continue;
-
-            gpuDevices.Add(dd);
+            if (IsDesktopDevice(adapter))
+                adapters.Add(adapter);
         }
 
-        foreach (var gpu in gpuDevices)
+        foreach (DisplayInterop.DISPLAY_DEVICEW adapter in adapters)
         {
-            var deviceName = gpu.DeviceName.TrimEnd('\0');
-            var deviceString = gpu.DeviceString.TrimEnd('\0');
-            var deviceId = gpu.DeviceID.TrimEnd('\0');
+            var adapterName = adapter.DeviceName.TrimEnd('\0');
+            var adapterString = adapter.DeviceString.TrimEnd('\0');
+            var adapterId = adapter.DeviceID.TrimEnd('\0');
 
-            for (uint j = 0; j < MaxDisplayDevices; j++)
+            foreach (DisplayInterop.DISPLAY_DEVICEW monitorDevice in
+                EnumerateAttachedMonitorDevices(adapterName))
             {
-                var dd2 = CreateDisplayDevice();
-
-                if (!DisplayInterop.EnumDisplayDevicesW(deviceName, j, ref dd2, 1))
-                    break;
-
-                var subString = dd2.DeviceString.TrimEnd('\0');
-                var subId = dd2.DeviceID.TrimEnd('\0');
-
-                if ((dd2.StateFlags & DisplayInterop.DISPLAY_DEVICE_MIRRORING_DRIVER) != 0)
-                    continue;
-                if ((dd2.StateFlags & DisplayInterop.DISPLAY_DEVICE_ATTACHED_TO_DESKTOP) == 0)
+                if (!IsDesktopDevice(monitorDevice))
                     continue;
 
                 var monitor = MonitorInfoParser.CreateMonitorFromEnumDevices(
-                    subString, subId, deviceId, deviceString);
-                monitor.DisplayName = deviceName;
+                    monitorDevice.DeviceString.TrimEnd('\0'),
+                    monitorDevice.DeviceID.TrimEnd('\0'),
+                    adapterId,
+                    adapterString);
+                monitor.DisplayName = adapterName;
                 monitor.RefreshRateHz = DisplayInterop.GetDeviceRefreshRateHz(
-                    deviceName);
+                    adapterName);
                 monitors.Add(monitor);
             }
         }
 
         return monitors;
+    }
+
+    private static bool IsActiveMonitorDevice(DisplayInterop.DISPLAY_DEVICEW device) =>
+        (device.StateFlags & DisplayInterop.DISPLAY_DEVICE_ACTIVE) != 0 &&
+        (device.StateFlags & DisplayInterop.DISPLAY_DEVICE_MIRRORING_DRIVER) == 0;
+
+    private static bool IsDesktopDevice(DisplayInterop.DISPLAY_DEVICEW device) =>
+        (device.StateFlags & DisplayInterop.DISPLAY_DEVICE_ATTACHED_TO_DESKTOP) != 0 &&
+        (device.StateFlags & DisplayInterop.DISPLAY_DEVICE_MIRRORING_DRIVER) == 0;
+
+    private static bool TryGetDisplayDevice(
+        string? parentName,
+        uint index,
+        uint flags,
+        out DisplayInterop.DISPLAY_DEVICEW device)
+    {
+        device = CreateDisplayDevice();
+        return DisplayInterop.EnumDisplayDevicesW(parentName, index, ref device, flags);
     }
 
     private static DisplayInterop.DISPLAY_DEVICEW CreateDisplayDevice()

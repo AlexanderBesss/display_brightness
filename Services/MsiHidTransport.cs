@@ -6,52 +6,6 @@ using Microsoft.Win32.SafeHandles;
 
 namespace DisplayBrightness.Services;
 
-internal enum HidOperationState
-{
-    Success,
-    NotConnected,
-    Busy,
-    TimedOut,
-    Failed
-}
-
-internal sealed record HidOperationResult(
-    HidOperationState State,
-    string Value,
-    string Message)
-{
-    public static HidOperationResult Ok(string value = "") =>
-        new(HidOperationState.Success, value, string.Empty);
-
-    public static HidOperationResult Fail(string message) =>
-        new(HidOperationState.Failed, string.Empty, message);
-
-    public static HidOperationResult NotConnected() =>
-        new(
-            HidOperationState.NotConnected,
-            string.Empty,
-            "Connect the monitor's USB upstream cable to use OLED Care.");
-
-    public static HidOperationResult Busy() =>
-        new(
-            HidOperationState.Busy,
-            string.Empty,
-            "MSI Gaming Intelligence is using the monitor. Close it and try again.");
-
-    public static HidOperationResult TimedOut() =>
-        new(
-            HidOperationState.TimedOut,
-            string.Empty,
-            "The MSI OLED control interface timed out.");
-}
-
-internal sealed record HidReportCapabilities(
-    ushort UsagePage,
-    ushort Usage,
-    int InputReportLength,
-    int OutputReportLength,
-    int FeatureReportLength);
-
 internal interface IMsiHidTransport
 {
     Task<HidOperationResult> GetAsync(
@@ -85,57 +39,24 @@ internal interface IMsiHidTransport
         CancellationToken cancellationToken);
 }
 
-internal static class MsiProtocol
-{
-    public const string GetVerb = "58";
-    public const string ReplyVerb = "5b";
-    public const string ScalerEventGetVerb = "68";
-    public const string ScalerEventReplyVerb = "6b";
-    public const string AckSuccess = "5600+";
-    public const string AckFailure = "5600-";
-    public const int FeatureCodeLength = 5;
-
-    public static string GetCommand(string featureCode) =>
-        GetVerb + featureCode + "\r";
-
-    public static string GetScalerEventCommand(string featureCode) =>
-        ScalerEventGetVerb + featureCode + "\r";
-
-    public static string SetCommand(string featureCode, string value) =>
-        ReplyVerb + featureCode + value + "\r";
-
-    public static bool TryParseReply(
-        string payload,
-        string featureCode,
-        out string value) =>
-        TryParseReply(payload, ReplyVerb, featureCode, out value);
-
-    public static bool TryParseScalerEventReply(
-        string payload,
-        string featureCode,
-        out string value) =>
-        TryParseReply(payload, ScalerEventReplyVerb, featureCode, out value);
-
-    private static bool TryParseReply(
-        string payload,
-        string replyVerb,
-        string featureCode,
-        out string value)
-    {
-        value = string.Empty;
-        string expected = replyVerb + featureCode;
-        if (!payload.StartsWith(expected, StringComparison.Ordinal))
-            return false;
-
-        value = payload[expected.Length..];
-        return true;
-    }
-}
-
+/// <summary>
+/// Sends MSI protocol commands to the USB interface of one specific display.
+/// Every call first identifies the candidate devices by their chassis serial so
+/// a command can never reach a different monitor that shares the VID/PID.
+/// </summary>
 internal sealed class MsiHidTransport : IMsiHidTransport
 {
-    internal sealed record Command(string Frame, bool IsSet, bool WaitForAck,
-        string FeatureCode, string ReplyVerb);
+    internal sealed record Command(
+        string Frame,
+        bool IsSet,
+        bool WaitForAck,
+        string FeatureCode,
+        string ReplyVerb);
+
+    private const byte ReportId = 0x01;
+    private const int MinimumReportLength = 64;
+    private static readonly TimeSpan IoTimeout = TimeSpan.FromMilliseconds(2500);
+    private static readonly SemaphoreSlim DeviceLock = new(1, 1);
 
     private readonly Func<ushort, ushort[], List<string>> _enumerate;
     private readonly Func<string, Command, CancellationToken, Task<HidOperationResult>> _execute;
@@ -146,14 +67,8 @@ internal sealed class MsiHidTransport : IMsiHidTransport
     {
         _enumerate = enumerate ?? MsiHidNative.EnumerateDevicePaths;
         _execute = execute ?? ((path, command, token) => ExecuteForPathAsync(
-            path, command.Frame, command.IsSet, command.WaitForAck,
-            command.FeatureCode, command.ReplyVerb, token));
+            path, command, token));
     }
-
-    private const byte ReportId = 0x01;
-    private const int MinimumReportLength = 64;
-    private static readonly TimeSpan IoTimeout = TimeSpan.FromMilliseconds(2500);
-    private static readonly SemaphoreSlim DeviceLock = new(1, 1);
 
     public Task<HidOperationResult> GetAsync(
         ushort vendorId,
@@ -165,11 +80,12 @@ internal sealed class MsiHidTransport : IMsiHidTransport
             vendorId,
             productIds,
             monitorSerialNumber,
-            MsiProtocol.GetCommand(featureCode),
-            isSet: false,
-            waitForAck: false,
-            featureCode,
-            MsiProtocol.ReplyVerb,
+            new Command(
+                MsiProtocol.GetCommand(featureCode),
+                IsSet: false,
+                WaitForAck: false,
+                featureCode,
+                MsiProtocol.ReplyVerb),
             cancellationToken);
 
     public Task<HidOperationResult> GetScalerEventAsync(
@@ -182,11 +98,12 @@ internal sealed class MsiHidTransport : IMsiHidTransport
             vendorId,
             productIds,
             monitorSerialNumber,
-            MsiProtocol.GetScalerEventCommand(featureCode),
-            isSet: false,
-            waitForAck: false,
-            featureCode,
-            MsiProtocol.ScalerEventReplyVerb,
+            new Command(
+                MsiProtocol.GetScalerEventCommand(featureCode),
+                IsSet: false,
+                WaitForAck: false,
+                featureCode,
+                MsiProtocol.ScalerEventReplyVerb),
             cancellationToken);
 
     public Task<HidOperationResult> SetAsync(
@@ -200,11 +117,12 @@ internal sealed class MsiHidTransport : IMsiHidTransport
             vendorId,
             productIds,
             monitorSerialNumber,
-            MsiProtocol.SetCommand(featureCode, value),
-            isSet: true,
-            waitForAck: true,
-            featureCode,
-            MsiProtocol.ReplyVerb,
+            new Command(
+                MsiProtocol.SetCommand(featureCode, value),
+                IsSet: true,
+                WaitForAck: true,
+                featureCode,
+                MsiProtocol.ReplyVerb),
             cancellationToken);
 
     public Task<HidOperationResult> SetNoAckAsync(
@@ -218,83 +136,59 @@ internal sealed class MsiHidTransport : IMsiHidTransport
             vendorId,
             productIds,
             monitorSerialNumber,
-            MsiProtocol.SetCommand(featureCode, value),
-            isSet: true,
-            waitForAck: false,
-            featureCode,
-            MsiProtocol.ReplyVerb,
+            new Command(
+                MsiProtocol.SetCommand(featureCode, value),
+                IsSet: true,
+                WaitForAck: false,
+                featureCode,
+                MsiProtocol.ReplyVerb),
             cancellationToken);
 
     private Task<HidOperationResult> ExecuteAsync(
         ushort vendorId,
         ushort[] productIds,
         string monitorSerialNumber,
-        string command,
-        bool isSet,
-        bool waitForAck,
-        string featureCode,
-        string replyVerb,
+        Command command,
         CancellationToken cancellationToken) => Task.Run(
-            () => ExecuteCoreAsync(vendorId, productIds, monitorSerialNumber,
-                new Command(command, isSet, waitForAck, featureCode, replyVerb),
-                cancellationToken), cancellationToken);
+            () => ExecuteCoreAsync(
+                vendorId,
+                productIds,
+                monitorSerialNumber,
+                command,
+                cancellationToken),
+            cancellationToken);
 
     private async Task<HidOperationResult> ExecuteCoreAsync(
-        ushort vendorId, ushort[] productIds, string monitorSerialNumber,
-        Command command, CancellationToken cancellationToken)
+        ushort vendorId,
+        ushort[] productIds,
+        string monitorSerialNumber,
+        Command command,
+        CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        string serial = monitorSerialNumber.Trim();
-        if (serial.Length == 0 || serial.All(c => c == '0'))
+        if (!HasUsableSerial(monitorSerialNumber))
             return HidOperationResult.Fail(
                 "Cannot identify this display's serial number. OLED Care is unavailable.");
 
         await DeviceLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            List<string> paths = _enumerate(
-                vendorId,
-                productIds);
+            List<string> paths = _enumerate(vendorId, productIds);
             if (paths.Count == 0)
                 return HidOperationResult.NotConnected();
 
-            HidOperationResult? lastFailure = null;
-            bool identityProbeSucceeded = false;
-            var matches = new List<string>();
-            foreach (string path in paths)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                // Identification is GET-only. No status or write command may
-                // reach a device until its serial matches the selected display.
-                HidOperationResult result = await _execute(path,
-                    new Command(MsiProtocol.GetCommand("00130"), false, false,
-                        "00130", MsiProtocol.ReplyVerb), cancellationToken)
-                    .ConfigureAwait(false);
-                if (result.State != HidOperationState.Success)
-                {
-                    lastFailure = result;
-                    continue;
-                }
-                identityProbeSucceeded = true;
-                if (string.Equals(serial, result.Value.Trim(), StringComparison.OrdinalIgnoreCase))
-                    matches.Add(path);
-            }
-            if (matches.Count > 1)
+            IdentityProbeOutcome probe = await SelectDevicesBySerialAsync(
+                paths,
+                monitorSerialNumber.Trim(),
+                cancellationToken).ConfigureAwait(false);
+            if (probe.Matches.Count > 1)
                 return HidOperationResult.Fail(
                     "Multiple USB interfaces have this display's serial number. OLED Care is unavailable.");
-            if (matches.Count == 0 && paths.Count == 1 && identityProbeSucceeded)
-            {
-                // Some monitors expose an EDID factory serial through WMI but a
-                // different chassis serial through the MSI HID register. With
-                // exactly one responsive VID/PID candidate there is no device
-                // ambiguity, so use that candidate. Never apply this fallback
-                // when multiple interfaces are present.
-                matches.Add(paths[0]);
-            }
-            if (matches.Count == 0)
-                return lastFailure ?? HidOperationResult.NotConnected();
+            if (probe.Matches.Count == 0)
+                return probe.LastFailure ?? HidOperationResult.NotConnected();
+
             cancellationToken.ThrowIfCancellationRequested();
-            return await _execute(matches[0], command, cancellationToken).ConfigureAwait(false);
+            return await _execute(probe.Matches[0], command, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -302,20 +196,83 @@ internal sealed class MsiHidTransport : IMsiHidTransport
         }
     }
 
+    private sealed record IdentityProbeOutcome(
+        List<string> Matches,
+        HidOperationResult? LastFailure);
+
+    /// <summary>
+    /// Returns the candidate interfaces whose chassis serial matches, plus the
+    /// last probe failure so the caller can report why nothing matched.
+    /// Identification is GET-only: no status or write command may reach a device
+    /// until its serial matches the selected display.
+    /// </summary>
+    private async Task<IdentityProbeOutcome> SelectDevicesBySerialAsync(
+        List<string> paths,
+        string serial,
+        CancellationToken cancellationToken)
+    {
+        var matches = new List<string>();
+        HidOperationResult? lastFailure = null;
+        bool identityProbeSucceeded = false;
+        foreach (string path in paths)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            HidOperationResult result = await _execute(
+                path,
+                IdentityProbeCommand,
+                cancellationToken).ConfigureAwait(false);
+            if (result.State != HidOperationState.Success)
+            {
+                lastFailure = result;
+                continue;
+            }
+
+            identityProbeSucceeded = true;
+            if (string.Equals(serial, result.Value.Trim(), StringComparison.OrdinalIgnoreCase))
+                matches.Add(path);
+        }
+
+        if (matches.Count == 0 && paths.Count == 1 && identityProbeSucceeded)
+        {
+            // Some monitors expose an EDID factory serial through WMI but a
+            // different chassis serial through the MSI HID register. With exactly
+            // one responsive VID/PID candidate there is no device ambiguity, so
+            // use that candidate. Never apply this fallback when multiple
+            // interfaces are present.
+            matches.Add(paths[0]);
+            lastFailure = null;
+        }
+
+        return new IdentityProbeOutcome(matches, lastFailure);
+    }
+
+    private static readonly Command IdentityProbeCommand = new(
+        MsiProtocol.GetCommand(MsiProtocol.SerialNumberFeatureCode),
+        IsSet: false,
+        WaitForAck: false,
+        MsiProtocol.SerialNumberFeatureCode,
+        MsiProtocol.ReplyVerb);
+
+    /// <summary>
+    /// A blank or all-zero EDID serial means the display never reported one, so
+    /// there is no way to prove which interface belongs to it.
+    /// </summary>
+    private static bool HasUsableSerial(string monitorSerialNumber)
+    {
+        string serial = monitorSerialNumber.Trim();
+        return serial.Length > 0 && !serial.All(character => character == '0');
+    }
+
     private static async Task<HidOperationResult> ExecuteForPathAsync(
         string path,
-        string command,
-        bool isSet,
-        bool waitForAck,
-        string featureCode,
-        string replyVerb,
+        Command command,
         CancellationToken cancellationToken)
     {
         using SafeFileHandle handle = MsiHidNative.OpenDevice(path);
         if (handle.IsInvalid)
         {
             int error = Marshal.GetLastWin32Error();
-            return error is MsiHidNative.ErrorAccessDenied or MsiHidNative.ErrorSharingViolation
+            return IsDeviceBusyError(error)
                 ? HidOperationResult.Busy()
                 : HidOperationResult.Fail(new Win32Exception(error).Message);
         }
@@ -332,7 +289,7 @@ internal sealed class MsiHidTransport : IMsiHidTransport
         }
 
         byte[]? outputReport = BuildOutputReport(
-            command,
+            command.Frame,
             capabilities.OutputReportLength,
             ReportId);
         if (outputReport == null)
@@ -356,15 +313,13 @@ internal sealed class MsiHidTransport : IMsiHidTransport
                 .ConfigureAwait(false);
             await stream.FlushAsync(timeoutSource.Token).ConfigureAwait(false);
 
-            if (isSet && !waitForAck)
+            if (command.IsSet && !command.WaitForAck)
                 return HidOperationResult.Ok();
 
             string? payload = await ReadMatchingPayloadAsync(
                 stream,
                 capabilities.InputReportLength,
-                isSet,
-                featureCode,
-                replyVerb,
+                command,
                 timeoutSource.Token).ConfigureAwait(false);
             if (payload == null)
                 return HidOperationResult.TimedOut();
@@ -373,22 +328,18 @@ internal sealed class MsiHidTransport : IMsiHidTransport
                 return HidOperationResult.Fail(
                     "The monitor rejected the command.");
 
-            if (isSet)
+            if (command.IsSet)
                 return HidOperationResult.Ok();
 
-            string value;
-            bool parsed = replyVerb == MsiProtocol.ScalerEventReplyVerb
-                ? MsiProtocol.TryParseScalerEventReply(
+            if (!MsiProtocol.TryParseReply(
                     payload,
-                    featureCode,
-                    out value)
-                : MsiProtocol.TryParseReply(
-                    payload,
-                    featureCode,
-                    out value);
-            if (!parsed)
+                    command.ReplyVerb,
+                    command.FeatureCode,
+                    out string value))
+            {
                 return HidOperationResult.Fail(
                     $"Unexpected reply from the monitor: {payload}.");
+            }
 
             return HidOperationResult.Ok(value);
         }
@@ -399,23 +350,24 @@ internal sealed class MsiHidTransport : IMsiHidTransport
         catch (IOException ex)
         {
             int error = ex.HResult & 0xFFFF;
-            return error is MsiHidNative.ErrorAccessDenied or MsiHidNative.ErrorSharingViolation
+            return IsDeviceBusyError(error)
                 ? HidOperationResult.Busy()
                 : HidOperationResult.Fail(ex.Message);
         }
     }
 
+    private static bool IsDeviceBusyError(int error) =>
+        error is MsiHidNative.ErrorAccessDenied or MsiHidNative.ErrorSharingViolation;
+
     private static async Task<string?> ReadMatchingPayloadAsync(
         Stream stream,
         int inputReportLength,
-        bool isSet,
-        string featureCode,
-        string replyVerb,
+        Command command,
         CancellationToken cancellationToken)
     {
-        string expectedReply = isSet
+        string expectedReply = command.IsSet
             ? MsiProtocol.AckSuccess
-            : replyVerb + featureCode;
+            : command.ReplyVerb + command.FeatureCode;
 
         byte[] report = new byte[inputReportLength];
         while (!cancellationToken.IsCancellationRequested)
@@ -426,7 +378,7 @@ internal sealed class MsiHidTransport : IMsiHidTransport
                 continue;
 
             string payload = ExtractPayload(report, count);
-            if (isSet)
+            if (command.IsSet)
             {
                 if (payload is MsiProtocol.AckSuccess or MsiProtocol.AckFailure)
                     return payload;
@@ -471,239 +423,5 @@ internal sealed class MsiHidTransport : IMsiHidTransport
         report[0] = reportId;
         commandBytes.CopyTo(report, 1);
         return report;
-    }
-}
-
-internal static class MsiHidNative
-{
-    public const int ErrorAccessDenied = 5;
-    public const int ErrorSharingViolation = 32;
-
-    private const uint GenericRead = 0x80000000;
-    private const uint GenericWrite = 0x40000000;
-    private const uint FileShareRead = 0x00000001;
-    private const uint FileShareWrite = 0x00000002;
-    private const uint OpenExisting = 3;
-    private const uint FileFlagOverlapped = 0x40000000;
-    private const uint DigcfPresent = 0x00000002;
-    private const uint DigcfDeviceInterface = 0x00000010;
-
-    public static List<string> EnumerateDevicePaths(ushort vendorId, ushort[] productIds) =>
-        EnumerateInterfacePaths(vendorId, productIds, requireProduct: true);
-
-    public static List<string> EnumerateVendorPaths(ushort vendorId) =>
-        EnumerateInterfacePaths(vendorId, [], requireProduct: false);
-
-    private static List<string> EnumerateInterfacePaths(
-        ushort vendorId,
-        ushort[] productIds,
-        bool requireProduct)
-    {
-        HidD_GetHidGuid(out Guid hidGuid);
-        IntPtr deviceInfoSet = SetupDiGetClassDevsW(
-            ref hidGuid,
-            null,
-            IntPtr.Zero,
-            DigcfPresent | DigcfDeviceInterface);
-        if (deviceInfoSet == new IntPtr(-1))
-            return [];
-
-        var paths = new List<string>();
-        try
-        {
-            for (uint index = 0; ; index++)
-            {
-                var interfaceData = new SpDeviceInterfaceData
-                {
-                    CbSize = (uint)Marshal.SizeOf<SpDeviceInterfaceData>()
-                };
-                if (!SetupDiEnumDeviceInterfaces(
-                        deviceInfoSet,
-                        IntPtr.Zero,
-                        ref hidGuid,
-                        index,
-                        ref interfaceData))
-                {
-                    break;
-                }
-
-                SetupDiGetDeviceInterfaceDetailW(
-                    deviceInfoSet,
-                    ref interfaceData,
-                    IntPtr.Zero,
-                    0,
-                    out uint requiredSize,
-                    IntPtr.Zero);
-                if (requiredSize == 0)
-                    continue;
-
-                IntPtr detailBuffer = Marshal.AllocHGlobal((int)requiredSize);
-                try
-                {
-                    Marshal.WriteInt32(detailBuffer, IntPtr.Size == 8 ? 8 : 6);
-                    if (!SetupDiGetDeviceInterfaceDetailW(
-                            deviceInfoSet,
-                            ref interfaceData,
-                            detailBuffer,
-                            requiredSize,
-                            out _,
-                            IntPtr.Zero))
-                    {
-                        continue;
-                    }
-
-                    string? path = Marshal.PtrToStringUni(IntPtr.Add(detailBuffer, 4));
-                    if (string.IsNullOrWhiteSpace(path))
-                        continue;
-
-                    string vendorToken = $"vid_{vendorId:x4}";
-                    if (!path.Contains(vendorToken, StringComparison.OrdinalIgnoreCase))
-                        continue;
-                    if (requireProduct &&
-                        !productIds.Any(productId =>
-                            path.Contains($"pid_{productId:x4}", StringComparison.OrdinalIgnoreCase)))
-                    {
-                        continue;
-                    }
-
-                    paths.Add(path);
-                }
-                finally
-                {
-                    Marshal.FreeHGlobal(detailBuffer);
-                }
-            }
-        }
-        finally
-        {
-            SetupDiDestroyDeviceInfoList(deviceInfoSet);
-        }
-
-        return paths;
-    }
-
-    public static SafeFileHandle OpenDevice(string path) =>
-        CreateFileW(
-            path,
-            GenericRead | GenericWrite,
-            FileShareRead | FileShareWrite,
-            IntPtr.Zero,
-            OpenExisting,
-            FileFlagOverlapped,
-            IntPtr.Zero);
-
-    public static bool TryGetReportCapabilities(
-        SafeFileHandle handle,
-        out HidReportCapabilities? capabilities)
-    {
-        capabilities = null;
-        if (!HidD_GetPreparsedData(handle, out IntPtr preparsedData))
-            return false;
-
-        try
-        {
-            int result = HidP_GetCaps(preparsedData, out HidpCaps caps);
-            if (result < 0)
-                return false;
-
-            capabilities = new HidReportCapabilities(
-                caps.UsagePage,
-                caps.Usage,
-                caps.InputReportByteLength,
-                caps.OutputReportByteLength,
-                caps.FeatureReportByteLength);
-            return true;
-        }
-        finally
-        {
-            HidD_FreePreparsedData(preparsedData);
-        }
-    }
-
-    [DllImport("hid.dll")]
-    private static extern void HidD_GetHidGuid(out Guid hidGuid);
-
-    [DllImport("hid.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool HidD_GetPreparsedData(
-        SafeFileHandle hidDeviceObject,
-        out IntPtr preparsedData);
-
-    [DllImport("hid.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool HidD_FreePreparsedData(IntPtr preparsedData);
-
-    [DllImport("hid.dll")]
-    private static extern int HidP_GetCaps(IntPtr preparsedData, out HidpCaps capabilities);
-
-    [DllImport("setupapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern IntPtr SetupDiGetClassDevsW(
-        ref Guid classGuid,
-        string? enumerator,
-        IntPtr parentWindow,
-        uint flags);
-
-    [DllImport("setupapi.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool SetupDiEnumDeviceInterfaces(
-        IntPtr deviceInfoSet,
-        IntPtr deviceInfoData,
-        ref Guid interfaceClassGuid,
-        uint memberIndex,
-        ref SpDeviceInterfaceData deviceInterfaceData);
-
-    [DllImport("setupapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool SetupDiGetDeviceInterfaceDetailW(
-        IntPtr deviceInfoSet,
-        ref SpDeviceInterfaceData deviceInterfaceData,
-        IntPtr deviceInterfaceDetailData,
-        uint deviceInterfaceDetailDataSize,
-        out uint requiredSize,
-        IntPtr deviceInfoData);
-
-    [DllImport("setupapi.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool SetupDiDestroyDeviceInfoList(IntPtr deviceInfoSet);
-
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern SafeFileHandle CreateFileW(
-        string fileName,
-        uint desiredAccess,
-        uint shareMode,
-        IntPtr securityAttributes,
-        uint creationDisposition,
-        uint flagsAndAttributes,
-        IntPtr templateFile);
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct SpDeviceInterfaceData
-    {
-        public uint CbSize;
-        public Guid InterfaceClassGuid;
-        public uint Flags;
-        public UIntPtr Reserved;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct HidpCaps
-    {
-        public ushort Usage;
-        public ushort UsagePage;
-        public ushort InputReportByteLength;
-        public ushort OutputReportByteLength;
-        public ushort FeatureReportByteLength;
-        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 17)]
-        public ushort[] Reserved;
-        public ushort NumberLinkCollectionNodes;
-        public ushort NumberInputButtonCaps;
-        public ushort NumberInputValueCaps;
-        public ushort NumberInputDataIndices;
-        public ushort NumberOutputButtonCaps;
-        public ushort NumberOutputValueCaps;
-        public ushort NumberOutputDataIndices;
-        public ushort NumberFeatureButtonCaps;
-        public ushort NumberFeatureValueCaps;
-        public ushort NumberFeatureDataIndices;
     }
 }

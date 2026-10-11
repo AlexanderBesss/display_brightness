@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
+using DisplayBrightness.Utilities;
 
 namespace DisplayBrightness.Services;
 
@@ -31,7 +32,6 @@ internal sealed class NativeTrayIcon : NativeWindow, IDisposable
     private const ushort GenericDesktopUsagePage = 0x01;
     private const ushort MouseUsage = 0x02;
     private const ushort RawMouseWheel = 0x0400;
-    private const int WheelDelta = 120;
     private const uint RawInputError = uint.MaxValue;
 
     // The icon is identified by this window plus a non-zero id. A GUID would
@@ -254,8 +254,8 @@ internal sealed class NativeTrayIcon : NativeWindow, IDisposable
             }
 
             _wheelRemainder += delta;
-            int detents = _wheelRemainder / WheelDelta;
-            _wheelRemainder %= WheelDelta;
+            int detents = _wheelRemainder / WheelNotch.DetentUnits;
+            _wheelRemainder %= WheelNotch.DetentUnits;
 
             if (detents != 0)
                 MouseWheel?.Invoke(detents);

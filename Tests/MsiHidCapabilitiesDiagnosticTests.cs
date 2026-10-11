@@ -32,9 +32,14 @@ public sealed class MsiHidCapabilitiesDiagnosticTests
             {
                 var method = typeof(MsiHidTransport).GetMethod(
                     "ExecuteForPathAsync", BindingFlags.NonPublic | BindingFlags.Static)!;
+                var probeCommand = new MsiHidTransport.Command(
+                    MsiProtocol.GetCommand(MsiProtocol.SerialNumberFeatureCode),
+                    IsSet: false,
+                    WaitForAck: false,
+                    MsiProtocol.SerialNumberFeatureCode,
+                    MsiProtocol.ReplyVerb);
                 var rawTask = (Task<HidOperationResult>)method.Invoke(null,
-                    [path, MsiProtocol.GetCommand("00130"), false, false, "00130",
-                     MsiProtocol.ReplyVerb, CancellationToken.None])!;
+                    [path, probeCommand, CancellationToken.None])!;
                 HidOperationResult raw = await rawTask;
                 Console.WriteLine($"  Raw GET 00130: state={raw.State} value='{raw.Value}' message={raw.Message}");
             }

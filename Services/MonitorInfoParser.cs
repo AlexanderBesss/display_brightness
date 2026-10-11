@@ -112,21 +112,20 @@ public static class MonitorInfoParser
 
     public static MonitorInfo CreateMonitorFromEnumMonitors(
         string monitorDeviceName,
-        (string deviceString, string deviceId, string parentName) deviceInfo)
+        MonitorDeviceDescription deviceInfo)
     {
-        var (deviceString, deviceId, parentName) = deviceInfo;
-        var hardwareId = ExtractHardwareId(deviceId);
+        var hardwareId = ExtractHardwareId(deviceInfo.DeviceId);
         var friendlyName = string.Equals(
-            deviceString, parentName, StringComparison.OrdinalIgnoreCase)
+            deviceInfo.DeviceString, deviceInfo.ParentName, StringComparison.OrdinalIgnoreCase)
                 ? monitorDeviceName
-                : FirstNonEmpty(deviceString, monitorDeviceName);
+                : FirstNonEmpty(deviceInfo.DeviceString, monitorDeviceName);
 
         return new MonitorInfo
         {
-            DevicePath = FirstNonEmpty(deviceId, monitorDeviceName),
+            DevicePath = FirstNonEmpty(deviceInfo.DeviceId, monitorDeviceName),
             DisplayName = monitorDeviceName,
             FriendlyName = friendlyName,
-            ModelName = FirstNonEmpty(ExtractModelFromDeviceId(deviceId), hardwareId),
+            ModelName = FirstNonEmpty(ExtractModelFromDeviceId(deviceInfo.DeviceId), hardwareId),
             HardwareId = hardwareId,
             ManufacturerCode = hardwareId.Length >= 3 ? hardwareId[..3] : string.Empty
         };

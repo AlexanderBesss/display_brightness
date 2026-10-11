@@ -14,7 +14,6 @@ namespace DisplayBrightness;
 
 public partial class App : System.Windows.Application
 {
-    private const int BrightnessStep = 2;
     private const string StartupArgument = "--startup";
 
     private const long LogSoftLimitBytes = 256 * 1024;
@@ -259,7 +258,7 @@ public partial class App : System.Windows.Application
 
         if (wheelSteps != 0)
             AsyncHelper.FireAndForget(async () => await viewModel.AdjustPrimaryBrightnessAsync(
-                wheelSteps * BrightnessStep), "tray brightness adjustment");
+                wheelSteps * WheelNotch.BrightnessStep), "tray brightness adjustment");
 
         if (Volatile.Read(ref _pendingWheelSteps) != 0)
             QueueBrightnessAdjustment(viewModel, 0);

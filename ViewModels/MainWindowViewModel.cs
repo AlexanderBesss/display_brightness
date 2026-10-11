@@ -146,8 +146,7 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
         if (_isDisposed)
             return;
         _topologyVersion++;
-        foreach (var monitor in Monitors)
-            monitor.SuspendForTopologyChange();
+        SuspendAllMonitorRows();
         NotifyMonitorSummaryChanged();
         _topologyDebounce?.Cancel();
         using var delay = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
@@ -205,8 +204,7 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
                     // Keep rows but stop using potentially stale targets. The
                     // background refresh timer retries even with the popup hidden.
                     _topologyVersion++;
-                    foreach (var monitor in Monitors)
-                        monitor.SuspendForTopologyChange();
+                    SuspendAllMonitorRows();
                 }
                 _isLoading = false;
                 NotifyMonitorSummaryChanged();
@@ -215,16 +213,20 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
         finally { _isRefreshRunning = false; }
     }
 
+    private void SuspendAllMonitorRows()
+    {
+        foreach (MonitorSliderViewModel monitor in Monitors)
+            monitor.SuspendForTopologyChange();
+    }
+
     private async Task<List<MonitorReading>> ReadMonitorsAsync()
     {
         // Snapshot on the calling (UI) thread: the read loop below runs on a worker
         // thread and must not walk a collection the UI thread mutates.
-        HashSet<string> retryOnFailure = new(StringComparer.OrdinalIgnoreCase);
-        foreach (MonitorSliderViewModel monitor in Monitors)
-        {
-            if (monitor.CanAdjustBrightness)
-                retryOnFailure.Add(monitor.Monitor.DevicePath);
-        }
+        HashSet<string> retryOnFailure = Monitors
+            .Where(monitor => monitor.CanAdjustBrightness)
+            .Select(monitor => monitor.Monitor.DevicePath)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         await _displayIo.WaitAsync(_lifetime.Token);
         try
@@ -235,26 +237,37 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
                 foreach (MonitorInfo monitor in _displayService.GetExternalMonitors())
                 {
                     _lifetime.Token.ThrowIfCancellationRequested();
-                    int? brightness = null;
-                    try { brightness = _displayService.GetBrightness(monitor); }
-                    catch { }
-                    if (!brightness.HasValue && retryOnFailure.Contains(monitor.DevicePath))
-                    {
-                        // A DDC/CI read can time out on a panel that is waking or
-                        // retraining its link. One paced retry keeps a transient
-                        // timeout from taking control away from a display that was
-                        // answering a moment ago. A display that has never answered
-                        // is not retried, so it does not pay the delay every cycle.
-                        await Task.Delay(BrightnessReadRetryDelay, _lifetime.Token);
-                        try { brightness = _displayService.GetBrightness(monitor); }
-                        catch { }
-                    }
+                    int? brightness = await ReadBrightnessWithRetryAsync(
+                        monitor,
+                        retryOnFailure);
                     readings.Add(new MonitorReading(monitor, brightness));
                 }
                 return readings;
             }, _lifetime.Token);
         }
         finally { _displayIo.Release(); }
+    }
+
+    private async Task<int?> ReadBrightnessWithRetryAsync(
+        MonitorInfo monitor,
+        HashSet<string> retryOnFailure)
+    {
+        int? brightness = TryReadBrightness(monitor);
+        if (brightness.HasValue || !retryOnFailure.Contains(monitor.DevicePath))
+            return brightness;
+
+        // A DDC/CI read can time out on a panel that is waking or retraining its
+        // link. One paced retry keeps a transient timeout from taking control away
+        // from a display that was answering a moment ago. A display that has never
+        // answered is not retried, so it does not pay the delay every cycle.
+        await Task.Delay(BrightnessReadRetryDelay, _lifetime.Token);
+        return TryReadBrightness(monitor);
+    }
+
+    private int? TryReadBrightness(MonitorInfo monitor)
+    {
+        try { return _displayService.GetBrightness(monitor); }
+        catch { return null; }
     }
 
     public Task<bool> AdjustPrimaryBrightnessAsync(int delta) =>
@@ -278,22 +291,30 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
         MonitorInfo target = monitor.Snapshot();
         try
         {
-            await _displayIo.WaitAsync(_lifetime.Token);
-            try
-            {
-                bool written = await Task.Run(() =>
-                    !_isDisposed && topology == Volatile.Read(ref _topologyVersion) &&
-                    _displayService.SetBrightness(target, brightness));
-                if (!written)
-                    return false;
-            }
-            finally { _displayIo.Release(); }
+            if (!await WriteBrightnessAsync(target, brightness, topology))
+                return false;
+
             _savedSettings[target.DevicePath] = brightness;
             var snapshot = new Dictionary<string, int>(_savedSettings, StringComparer.OrdinalIgnoreCase);
             await QueuePersistence(() => _storageService.SaveSettings(snapshot));
             return true;
         }
         catch { return false; }
+    }
+
+    private async Task<bool> WriteBrightnessAsync(
+        MonitorInfo target,
+        int brightness,
+        int topology)
+    {
+        await _displayIo.WaitAsync(_lifetime.Token);
+        try
+        {
+            return await Task.Run(() =>
+                !_isDisposed && topology == Volatile.Read(ref _topologyVersion) &&
+                _displayService.SetBrightness(target, brightness));
+        }
+        finally { _displayIo.Release(); }
     }
 
     private void ApplyMonitorReadings(List<MonitorReading> readings, Dictionary<string, long> revisions)
@@ -310,25 +331,46 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
             }
             else
             {
-                _oledPanelProtectState.TryGetValue(monitor.DevicePath, out var oledState);
-                OledPanelProtectHistory? history = oledState?.History;
-                OledPanelProtectNotification? notification = oledState?.Notification;
-                vm = new MonitorSliderViewModel(monitor, reading.Brightness,
-                    value => CommitBrightnessAsync(monitor, value), _oledCareService, _dialogService,
-                    history, entry => SaveOledPanelProtectHistory(monitor, entry), _timeProvider,
-                    notification, entry => SaveOledPanelProtectNotification(monitor, entry));
+                vm = CreateMonitorRow(monitor, reading.Brightness);
                 vm.PropertyChanged += Monitor_PropertyChanged;
             }
             vm.IsPrimary = string.Equals(monitor.DisplayName, primaryName, StringComparison.OrdinalIgnoreCase);
             updated.Add(vm);
         }
-        foreach (var removed in existing.Values)
+        RetireMonitorRows(existing.Values);
+        OrderRowsByPrimary(updated);
+    }
+
+    private MonitorSliderViewModel CreateMonitorRow(MonitorInfo monitor, int? brightness)
+    {
+        _oledPanelProtectState.TryGetValue(monitor.DevicePath, out OledPanelProtectState? oledState);
+        return new MonitorSliderViewModel(
+            monitor,
+            brightness,
+            value => CommitBrightnessAsync(monitor, value),
+            _oledCareService,
+            _dialogService,
+            oledState?.History,
+            history => SaveOledPanelProtectHistory(monitor, history),
+            _timeProvider,
+            oledState?.Notification,
+            notification => SaveOledPanelProtectNotification(monitor, notification));
+    }
+
+    private void RetireMonitorRows(IEnumerable<MonitorSliderViewModel> retired)
+    {
+        foreach (MonitorSliderViewModel monitor in retired)
         {
-            removed.PropertyChanged -= Monitor_PropertyChanged;
-            removed.Dispose();
-            Monitors.Remove(removed);
+            monitor.PropertyChanged -= Monitor_PropertyChanged;
+            monitor.Dispose();
+            Monitors.Remove(monitor);
         }
-        var ordered = updated.OrderByDescending(m => m.IsPrimary).ToList();
+    }
+
+    private void OrderRowsByPrimary(List<MonitorSliderViewModel> rows)
+    {
+        List<MonitorSliderViewModel> ordered =
+            rows.OrderByDescending(m => m.IsPrimary).ToList();
         for (int i = 0; i < ordered.Count; i++)
         {
             int current = Monitors.IndexOf(ordered[i]);
@@ -340,15 +382,9 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
     private void SaveOledPanelProtectHistory(MonitorInfo monitor, OledPanelProtectHistory history)
     {
         if (string.IsNullOrWhiteSpace(monitor.DevicePath)) return;
-        OledPanelProtectState state = _oledPanelProtectState.TryGetValue(
-            monitor.DevicePath,
-            out var existing)
-            ? existing
-            : new OledPanelProtectState(null, null);
+        OledPanelProtectState state = GetOrCreateOledState(monitor.DevicePath);
         _oledPanelProtectState[monitor.DevicePath] = state with { History = history };
-        var snapshot = new Dictionary<string, OledPanelProtectState>(
-            _oledPanelProtectState, StringComparer.OrdinalIgnoreCase);
-        _ = QueuePersistence(() => _storageService.SaveOledPanelProtectState(snapshot));
+        QueueOledStatePersistence();
     }
 
     private void SaveOledPanelProtectNotification(MonitorInfo monitor, OledPanelProtectNotification? notification)
@@ -367,8 +403,19 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
             _oledPanelProtectState[monitor.DevicePath] =
                 new OledPanelProtectState(null, notification);
         }
+        QueueOledStatePersistence();
+    }
+
+    private OledPanelProtectState GetOrCreateOledState(string devicePath) =>
+        _oledPanelProtectState.TryGetValue(devicePath, out OledPanelProtectState? existing)
+            ? existing
+            : new OledPanelProtectState(null, null);
+
+    private void QueueOledStatePersistence()
+    {
         var snapshot = new Dictionary<string, OledPanelProtectState>(
-            _oledPanelProtectState, StringComparer.OrdinalIgnoreCase);
+            _oledPanelProtectState,
+            StringComparer.OrdinalIgnoreCase);
         _ = QueuePersistence(() => _storageService.SaveOledPanelProtectState(snapshot));
     }
 

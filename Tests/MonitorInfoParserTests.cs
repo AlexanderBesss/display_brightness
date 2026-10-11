@@ -1,3 +1,4 @@
+using DisplayBrightness.Models;
 using DisplayBrightness.Services;
 
 namespace DisplayBrightness.Tests;
@@ -33,7 +34,7 @@ public sealed class MonitorInfoParserTests
 
         var monitor = MonitorInfoParser.CreateMonitorFromEnumMonitors(
             @"\\.\DISPLAY2",
-            ("MSI MPG 271QRX", deviceId, @"\\.\DISPLAY2"));
+            new MonitorDeviceDescription("MSI MPG 271QRX", deviceId, @"\\.\DISPLAY2"));
 
         Assert.Equal(deviceId, monitor.DevicePath);
         Assert.Equal(@"\\.\DISPLAY2", monitor.DisplayName);

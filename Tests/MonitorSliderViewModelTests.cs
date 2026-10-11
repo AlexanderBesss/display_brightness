@@ -334,7 +334,7 @@ public sealed class MonitorSliderViewModelTests
                 100)
             : null;
 
-        string result = MonitorSliderViewModel.FormatLastPanelProtectText(
+        string result = PanelProtectTracker.FormatLastPanelProtectText(
             history,
             now);
 
@@ -355,7 +355,7 @@ public sealed class MonitorSliderViewModelTests
             now - TimeSpan.FromMinutes(elapsedMinutes),
             startedAtHours);
 
-        string result = MonitorSliderViewModel.FormatLastPanelProtectText(
+        string result = PanelProtectTracker.FormatLastPanelProtectText(
             history,
             now,
             currentHours);

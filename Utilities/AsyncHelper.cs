@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using DisplayBrightness.Services;
 
 namespace DisplayBrightness.Utilities;
 
@@ -17,6 +18,7 @@ internal static class AsyncHelper
         catch (Exception ex)
         {
             Debug.WriteLine($"[{context}] {ex}");
+            AppLog.Error($"[{context}] async operation failed", ex);
         }
     }
 }

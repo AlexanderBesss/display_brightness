@@ -153,6 +153,7 @@ internal sealed class NativeTrayIcon : NativeWindow, IDisposable
             catch (Exception ex)
             {
                 Debug.WriteLine($"Failed to restore tray icon: {ex.Message}");
+                AppLog.Warn($"failed to restore tray icon after taskbar restart: {ex.Message}");
             }
         }
 
@@ -204,7 +205,11 @@ internal sealed class NativeTrayIcon : NativeWindow, IDisposable
 
         data.VersionOrTimeout = NotifyIconVersion4;
         if (!ShellNotifyIcon(NimSetVersion, ref data))
+        {
+            int error = Marshal.GetLastWin32Error();
             Debug.WriteLine("Failed to set tray icon notification version.");
+            AppLog.Warn($"failed to set tray icon notification version (Win32 error {error})");
+        }
     }
 
     private void ProcessRawMouseInput(IntPtr rawInputHandle)
@@ -263,6 +268,7 @@ internal sealed class NativeTrayIcon : NativeWindow, IDisposable
         catch (Exception ex)
         {
             Debug.WriteLine($"Tray raw mouse input failed: {ex.Message}");
+            AppLog.Warn($"tray raw mouse input failed: {ex.Message}");
         }
         finally
         {
@@ -313,8 +319,9 @@ internal sealed class NativeTrayIcon : NativeWindow, IDisposable
                 (uint)devices.Length,
                 (uint)Marshal.SizeOf<RawInputDevice>()))
         {
-            Debug.WriteLine(
-                $"Failed to unregister tray mouse input: {Marshal.GetLastWin32Error()}");
+            int error = Marshal.GetLastWin32Error();
+            Debug.WriteLine($"Failed to unregister tray mouse input: {error}");
+            AppLog.Warn($"failed to unregister tray mouse input (Win32 error {error})");
         }
     }
 

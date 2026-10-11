@@ -1,5 +1,6 @@
 using DisplayBrightness.Models;
 using DisplayBrightness.Services;
+using DisplayBrightness.Utilities;
 using System.Windows.Threading;
 
 namespace DisplayBrightness.ViewModels;
@@ -33,6 +34,8 @@ internal sealed class PanelProtectTracker : IDisposable
     private string _lastExplanationText = "Not tracked yet · Panel Protect";
     private bool _isUsageHoursRefreshRunning;
     private bool _isEventRefreshRunning;
+    private readonly FailureStreak _eventPollFailures = new();
+    private readonly FailureStreak _usageHoursFailures = new();
     private bool _isDisposed;
 
     /// <summary>Raised whenever any value the view binds to has changed.</summary>
@@ -177,6 +180,7 @@ internal sealed class PanelProtectTracker : IDisposable
                 await _oledCareService.GetPanelProtectEventAsync(
                     _monitor,
                     cancellationToken);
+            _eventPollFailures.Cleared();
             if (!_isDisposed && panelEvent?.RequiresAttention == true)
             {
                 if (panelEvent.Type == _ignoredEventTypeUntilClear)
@@ -198,10 +202,14 @@ internal sealed class PanelProtectTracker : IDisposable
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
         }
-        catch
+        catch (Exception ex)
         {
             // A notification poll is advisory. Keep a previously latched
-            // notification and silently retry on the next timer tick.
+            // notification and silently retry on the next timer tick. The poll
+            // runs every second, so log only the first failure of a streak.
+            _eventPollFailures.Report(
+                $"Panel Protect event poll failed for {_monitor.FriendlyName} " +
+                $"[{_monitor.DevicePath}]: {ex.Message}");
         }
         finally
         {
@@ -223,6 +231,7 @@ internal sealed class PanelProtectTracker : IDisposable
             int? totalUsageHours = await _oledCareService.GetTotalUsageHoursAsync(
                 _monitor,
                 _cancellationToken);
+            _usageHoursFailures.Cleared();
             if (!_isDisposed && totalUsageHours is >= 0)
             {
                 _totalUsageHours = totalUsageHours;
@@ -234,9 +243,13 @@ internal sealed class PanelProtectTracker : IDisposable
             when (_cancellationToken.IsCancellationRequested)
         {
         }
-        catch
+        catch (Exception ex)
         {
-            // Keep the last known monitor value and retry on the next tick.
+            // Keep the last known monitor value and retry on the next tick;
+            // log only the first failure of a streak.
+            _usageHoursFailures.Report(
+                $"panel hours read failed for {_monitor.FriendlyName} " +
+                $"[{_monitor.DevicePath}]: {ex.Message}");
         }
         finally
         {
@@ -318,6 +331,9 @@ internal sealed class PanelProtectTracker : IDisposable
         if (_notification?.Type == eventType)
             return;
 
+        AppLog.Info(
+            $"Panel Protect notification for {_monitor.FriendlyName} [{_monitor.DevicePath}]: " +
+            $"{OledCareService.DescribePanelProtectEvent(eventType)}");
         DateTimeOffset observedAt = _notification?.FirstObservedAtUtc
             ?? _timeProvider.GetUtcNow();
         SetNotification(new OledPanelProtectNotification(

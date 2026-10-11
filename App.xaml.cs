@@ -27,8 +27,17 @@ public partial class App : System.Windows.Application
 
     private void App_OnStartup(object sender, StartupEventArgs e)
     {
+        RegisterGlobalExceptionHandlers();
+        AppLog.Session(
+            $"Brightness started (pid {Environment.ProcessId}, exe {Environment.ProcessPath}, " +
+            $"log {AppLog.LogFilePath})");
         LogStartupEvent($"startup args=[{string.Join(' ', e.Args)}]");
-        Exit += (_, _) => LogStartupEvent("Application.Exit");
+        AppLog.Info($"startup args=[{string.Join(' ', e.Args)}]");
+        Exit += (_, _) =>
+        {
+            LogStartupEvent("Application.Exit");
+            AppLog.Session("application exit");
+        };
         try
         {
             bool startHidden = e.Args.Any(argument => string.Equals(
@@ -37,14 +46,36 @@ public partial class App : System.Windows.Application
                 StringComparison.OrdinalIgnoreCase));
             StartApp(startHidden);
             LogStartupEvent($"StartApp completed (startHidden={startHidden})");
+            AppLog.Info($"startup complete (startHidden={startHidden})");
         }
         catch (Exception ex)
         {
+            AppLog.Error("startup failed", ex);
             WriteStartupError(ex);
             System.Windows.MessageBox.Show($"Failed to start Brightness:\n\n{ex.Message}",
                 "Brightness — Startup Error", MessageBoxButton.OK, MessageBoxImage.Error);
             Shutdown();
         }
+    }
+
+    // Log only: the default crash behaviour is unchanged. These handlers exist so
+    // failures that reach the top of the dispatcher, a background thread, or an
+    // unawaited task leave a trace in brightness.log.
+    private void RegisterGlobalExceptionHandlers()
+    {
+        DispatcherUnhandledException += (_, args) =>
+            AppLog.Error("unhandled dispatcher exception", args.Exception);
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+        {
+            // A throw can carry something that is not an Exception; keep its text
+            // instead of losing the payload to a failed cast.
+            if (args.ExceptionObject is Exception exception)
+                AppLog.Error("unhandled runtime exception", exception);
+            else
+                AppLog.Error($"unhandled runtime object: {args.ExceptionObject}");
+        };
+        TaskScheduler.UnobservedTaskException += (_, args) =>
+            AppLog.Error("unobserved task exception", args.Exception);
     }
 
     private static void LogStartupEvent(string message) =>
@@ -99,6 +130,7 @@ public partial class App : System.Windows.Application
         catch (Exception ex)
         {
             LogStartupEvent($"tray icon unavailable: {ex.GetType().Name}: {ex.Message}");
+            AppLog.Error("tray icon unavailable; window stays on screen", ex);
             trayAvailable = false;
             startHidden = false;
         }
@@ -235,6 +267,7 @@ public partial class App : System.Windows.Application
         catch (Exception ex)
         {
             Debug.WriteLine($"Failed to update tray icon: {ex.Message}");
+            AppLog.Warn($"failed to update tray icon: {ex.Message}");
         }
     }
 

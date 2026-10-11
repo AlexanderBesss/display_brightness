@@ -1,5 +1,7 @@
+using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using DisplayBrightness.Models;
+using DisplayBrightness.Utilities;
 
 namespace DisplayBrightness.Services;
 
@@ -10,6 +12,15 @@ public class MonitorEnumerator
     // EnumDisplayDevices flag: report each child's DeviceID as its device
     // interface path instead of a raw instance id.
     private const uint EddGetDeviceInterfaceName = 1;
+
+    // A monitor that fails to parse vanishes from the UI with no other trace, so
+    // the first sighting of each broken identity is logged once per process.
+    // Enumeration runs on a timer, so logging every sighting would bury the log.
+    private const int MaxLoggedParseFailures = 32;
+
+    private static readonly ConcurrentDictionary<string, FailureStreak> StrategyFailures = new();
+    private static readonly HashSet<string> LoggedParseFailures = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly object LoggedParseFailuresGate = new();
 
     public List<MonitorInfo> GetExternalMonitors()
     {
@@ -28,31 +39,59 @@ public class MonitorEnumerator
 
     private static List<MonitorInfo> Enumerate()
     {
-        if (TryEnumerate(TryGetMonitorsFromDisplayConfig, out var monitors))
+        if (TryEnumerate("DisplayConfig", TryGetMonitorsFromDisplayConfig, out var monitors))
             return monitors;
 
-        if (TryEnumerate(GetMonitorsViaEnumDisplayMonitors, out monitors))
+        if (TryEnumerate("EnumDisplayMonitors", GetMonitorsViaEnumDisplayMonitors, out monitors))
             return monitors;
 
-        return TryEnumerate(GetMonitorsViaEnumDisplayDevices, out monitors)
+        return TryEnumerate("EnumDisplayDevices", GetMonitorsViaEnumDisplayDevices, out monitors)
             ? monitors
             : new List<MonitorInfo>();
     }
 
     private static bool TryEnumerate(
+        string strategy,
         Func<List<MonitorInfo>> enumerate,
         out List<MonitorInfo> monitors)
     {
+        FailureStreak failures = StrategyFailures.GetOrAdd(
+            strategy,
+            static _ => new FailureStreak());
+
         try
         {
             monitors = enumerate();
+            failures.Cleared();
             return monitors.Count > 0;
         }
-        catch
+        catch (Exception ex)
         {
+            // The fallback chain retries on every refresh cycle: report the first
+            // failure of a streak, not one line per cycle.
+            failures.Report(
+                $"monitor enumeration strategy {strategy} failed: {ex.GetType().Name}: {ex.Message}");
             monitors = new List<MonitorInfo>();
             return false;
         }
+    }
+
+    /// <summary>
+    /// Logs one line per broken monitor identity per process, so a driver that
+    /// consistently fails to parse cannot write a line per enumeration cycle.
+    /// </summary>
+    private static void ReportParseFailure(string site, string identity)
+    {
+        lock (LoggedParseFailuresGate)
+        {
+            if (LoggedParseFailures.Count >= MaxLoggedParseFailures ||
+                !LoggedParseFailures.Add($"{site}|{identity}"))
+            {
+                return;
+            }
+        }
+
+        AppLog.Warn($"monitor enumeration dropped a monitor at {site}: {identity}");
     }
 
     private static List<MonitorInfo> GetMonitorsViaEnumDisplayMonitors()
@@ -64,6 +103,8 @@ public class MonitorEnumerator
         bool EnumCallback(IntPtr hMonitor, IntPtr hDC,
             ref DisplayInterop.RECT lprc, IntPtr lParam)
         {
+            string key = $"{lprc.Left},{lprc.Top},{lprc.Right},{lprc.Bottom}";
+            string monitorDeviceName = string.Empty;
             try
             {
                 var miex = new DisplayInterop.MONITORINFOEX
@@ -73,11 +114,10 @@ public class MonitorEnumerator
                 if (!DisplayInterop.GetMonitorInfoW(hMonitor, ref miex))
                     return true;
 
-                var key = $"{lprc.Left},{lprc.Top},{lprc.Right},{lprc.Bottom}";
                 if (!seen.Add(key))
                     return true;
 
-                var monitorDeviceName = miex.szDevice.TrimEnd('\0');
+                monitorDeviceName = miex.szDevice.TrimEnd('\0');
                 var info = deviceMap.TryGetValue(
                     monitorDeviceName,
                     out MonitorDeviceDescription? description)
@@ -94,8 +134,11 @@ public class MonitorEnumerator
 
                 return true;
             }
-            catch
+            catch (Exception ex)
             {
+                ReportParseFailure(
+                    $"EnumDisplayMonitors [{key} {monitorDeviceName}]",
+                    $"{ex.GetType().Name}: {ex.Message}");
                 return true;
             }
         }
@@ -246,8 +289,11 @@ public class MonitorEnumerator
                         monitors.Add(monitor);
                     }
                 }
-                catch
+                catch (Exception ex)
                 {
+                    ReportParseFailure(
+                        $"DisplayConfig [path {i}]",
+                        $"{ex.GetType().Name}: {ex.Message}");
                 }
             }
         });

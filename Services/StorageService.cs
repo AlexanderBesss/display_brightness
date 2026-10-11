@@ -37,11 +37,14 @@ public class StorageService : IStorageService
             if (!File.Exists(_settingsPath) && File.Exists(legacySettingsPath))
                 File.Copy(legacySettingsPath, _settingsPath);
         }
-        catch
+        catch (Exception ex)
         {
             // Settings are optional. A read-only or unavailable roaming profile
             // must not prevent brightness control from starting.
+            AppLog.Warn($"settings folder/legacy migration failed: {ex.Message}");
         }
+
+        AppLog.Info($"settings: {_settingsPath}; oled-state: {_oledStatePath}");
     }
 
     internal StorageService(string settingsPath)
@@ -81,8 +84,9 @@ public class StorageService : IStorageService
 
             return normalized;
         }
-        catch
+        catch (Exception ex)
         {
+            AppLog.Warn($"settings file unreadable, using defaults ({_settingsPath}): {ex.Message}");
             return CreateSettingsDictionary();
         }
     }
@@ -106,8 +110,9 @@ public class StorageService : IStorageService
                     JsonOptions);
             return NormalizeStateDictionary(loaded);
         }
-        catch
+        catch (Exception ex)
         {
+            AppLog.Warn($"OLED state unreadable, using defaults ({_oledStatePath}): {ex.Message}");
             return CreateOledStateDictionary();
         }
     }
@@ -225,8 +230,9 @@ public class StorageService : IStorageService
 
             return isEnabled;
         }
-        catch
+        catch (Exception ex)
         {
+            AppLog.Warn($"startup registry read failed: {ex.Message}");
             return false;
         }
     }
@@ -254,8 +260,9 @@ public class StorageService : IStorageService
 
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            AppLog.Error($"startup registry write failed (enabled={enabled})", ex);
             return false;
         }
     }
@@ -292,8 +299,11 @@ public class StorageService : IStorageService
                 else
                     File.Move(tempPath, destinationPath);
             }
-            catch
+            catch (Exception ex)
             {
+                // Persistence is optional, but a failure must leave a trace:
+                // callers treat a swallowed save as success.
+                AppLog.Error($"failed to save {destinationPath}", ex);
             }
             finally
             {
@@ -303,8 +313,11 @@ public class StorageService : IStorageService
                     {
                         File.Delete(tempPath);
                     }
-                    catch
+                    catch (Exception ex)
                     {
+                        // A leftover temp file is harmless, but it accumulates and
+                        // is confusing without a trace of why it could not go.
+                        AppLog.Warn($"could not remove temporary file {tempPath}: {ex.Message}");
                     }
                 }
             }

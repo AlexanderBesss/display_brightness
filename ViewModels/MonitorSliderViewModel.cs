@@ -20,6 +20,7 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
     private readonly TimeProvider _timeProvider;
     private readonly PanelProtectTracker _panelProtect;
     private readonly CancellationTokenSource _lifetimeCancellation = new();
+    private readonly FailureStreak _oledReadFailures = new();
 
     private long? _lastBrightnessWriteTimestamp;
     private int _wheelRemainder;
@@ -31,6 +32,7 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
     private bool _isTopologyStale;
     private int _connectionVersion;
     private OledCareStatus? _oledStatus;
+    private OledConnectionState? _lastOledConnectionState;
     private bool _isDisposed;
 
     internal long BrightnessRevision { get; private set; }
@@ -264,7 +266,15 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
                 _pendingBrightness = null;
                 _lastBrightnessWriteTimestamp = _timeProvider.GetTimestamp();
                 try { success = await _commitBrightness(brightness); }
-                catch { success = false; }
+                catch (Exception ex)
+                {
+                    // The commit pipeline logs its own failures; this only fires
+                    // when the injected callback itself throws, so the wording is
+                    // deliberately different from that site.
+                    success = false;
+                    AppLog.Warn(
+                        $"brightness commit callback threw for {DisplayName} [{_monitor.DevicePath}] -> {brightness}%", ex);
+                }
                 if (_isDisposed)
                     return false;
                 if (connection != _connectionVersion)
@@ -287,6 +297,9 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
                     }
                     else if (_pendingBrightness == null)
                     {
+                        AppLog.Warn(
+                            $"brightness write to {DisplayName} [{_monitor.DevicePath}] failed at " +
+                            $"{brightness}%; reverted to {_committedBrightness}%");
                         BrightnessValue = _committedBrightness;
                         BrightnessStatusText = "Brightness could not be changed. Try adjusting it again.";
                         // A rejected write does not erase demonstrated support.
@@ -350,6 +363,8 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
         if (brightness.HasValue)
         {
             _failedReads = 0;
+            if (!_isBrightnessAvailable)
+                AppLog.Info($"brightness readable again for {DisplayName} [{_monitor.DevicePath}]");
             SetBrightnessAvailability(true, string.Empty);
             return;
         }
@@ -364,12 +379,18 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
             _failedReads++;
             if (_failedReads < FailedReadsBeforeUnavailable)
             {
+                if (_failedReads == 1)
+                    AppLog.Warn(
+                        $"brightness read failed for {DisplayName} [{_monitor.DevicePath}]; " +
+                        "keeping the last value");
                 BrightnessStatusText = "Brightness could not be read. Keeping the last value.";
                 return;
             }
         }
 
         _failedReads = 0;
+        if (CanAdjustBrightness)
+            AppLog.Warn($"brightness became unreadable for {DisplayName} [{_monitor.DevicePath}]");
         SetBrightnessAvailability(false, UnavailableMessage);
     }
 
@@ -389,6 +410,7 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
             OledCareStatus status = await _oledCareService.GetStatusAsync(
                 _monitor,
                 cancellationToken);
+            _oledReadFailures.Cleared();
             if (!_isDisposed)
                 ApplyOledStatus(status);
         }
@@ -397,6 +419,10 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
         }
         catch (Exception ex)
         {
+            // Refreshed with every reading cycle: report the first failure of a
+            // streak rather than one line per cycle.
+            _oledReadFailures.Report(
+                $"OLED status read failed for {DisplayName} [{_monitor.DevicePath}]: {ex.Message}");
             if (!_isDisposed)
                 OledStatusText = $"Status unavailable: {ex.Message}";
         }
@@ -420,6 +446,9 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
                 _monitor, _lifetimeCancellation.Token);
             if (_isDisposed)
                 return;
+            AppLog.Info(
+                $"pixel refresh {(result.Started ? "started" : "not started")} " +
+                $"for {DisplayName} [{_monitor.DevicePath}]: {result.Message}");
             OledOperationMessage = result.Message;
             if (result.Started)
             {
@@ -434,6 +463,7 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
         }
         catch (Exception ex)
         {
+            AppLog.Error($"pixel refresh failed for {DisplayName} [{_monitor.DevicePath}]", ex);
             if (!_isDisposed)
                 OledOperationMessage = OledStatusText = $"Pixel refresh could not be started: {ex.Message}";
         }
@@ -447,6 +477,13 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
     private void ApplyOledStatus(OledCareStatus status)
     {
         _oledStatus = status;
+        if (_lastOledConnectionState != status.ConnectionState)
+        {
+            _lastOledConnectionState = status.ConnectionState;
+            AppLog.Info(
+                $"OLED Care connection for {DisplayName} [{_monitor.DevicePath}]: " +
+                $"{status.ConnectionState} ({status.Message})");
+        }
         _panelProtect.SetUsageHours(status.PanelInfo?.TotalUsageHours);
 
         if (status.RefreshRateHz is int refreshRateHz)

@@ -99,9 +99,10 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
             _startOnStartup = stored.Startup;
             OnPropertyChanged(nameof(StartOnStartup));
         }
-        catch
+        catch (Exception ex)
         {
             // A storage failure must not prevent monitor discovery.
+            AppLog.Error("settings load failed; continuing with defaults", ex);
         }
         if (!_isDisposed)
         {
@@ -145,6 +146,7 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
     {
         if (_isDisposed)
             return;
+        AppLog.Info("display configuration change");
         _topologyVersion++;
         SuspendAllMonitorRows();
         NotifyMonitorSummaryChanged();
@@ -199,10 +201,11 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
                     ApplyMonitorReadings(readings, revisions);
                 }
                 catch (OperationCanceledException) when (_isDisposed) { }
-                catch
+                catch (Exception ex)
                 {
                     // Keep rows but stop using potentially stale targets. The
                     // background refresh timer retries even with the popup hidden.
+                    AppLog.Error("monitor refresh failed; rows suspended until next cycle", ex);
                     _topologyVersion++;
                     SuspendAllMonitorRows();
                 }
@@ -299,7 +302,12 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
             await QueuePersistence(() => _storageService.SaveSettings(snapshot));
             return true;
         }
-        catch { return false; }
+        catch (Exception ex)
+        {
+            AppLog.Error(
+                $"brightness commit threw ({target.FriendlyName} [{target.DevicePath}] -> {brightness}%)", ex);
+            return false;
+        }
     }
 
     private async Task<bool> WriteBrightnessAsync(
@@ -311,8 +319,16 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
         try
         {
             return await Task.Run(() =>
-                !_isDisposed && topology == Volatile.Read(ref _topologyVersion) &&
-                _displayService.SetBrightness(target, brightness));
+            {
+                if (_isDisposed || topology != Volatile.Read(ref _topologyVersion))
+                    return false;
+                bool applied = _displayService.SetBrightness(target, brightness);
+                if (!applied)
+                    AppLog.Warn(
+                        $"brightness write rejected by display " +
+                        $"({target.FriendlyName} [{target.DevicePath}] -> {brightness}%)");
+                return applied;
+            });
         }
         finally { _displayIo.Release(); }
     }
@@ -333,6 +349,12 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 vm = CreateMonitorRow(monitor, reading.Brightness);
                 vm.PropertyChanged += Monitor_PropertyChanged;
+                AppLog.Info(
+                    $"display connected: {monitor.FriendlyName} ({monitor.ModelName}) " +
+                    $"[{monitor.DevicePath}]" +
+                    (reading.Brightness is int brightnessValue
+                        ? $" brightness={brightnessValue}%"
+                        : " brightness=unreadable"));
             }
             vm.IsPrimary = string.Equals(monitor.DisplayName, primaryName, StringComparison.OrdinalIgnoreCase);
             updated.Add(vm);
@@ -361,6 +383,7 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
     {
         foreach (MonitorSliderViewModel monitor in retired)
         {
+            AppLog.Info($"display retired: {monitor.Monitor.FriendlyName} [{monitor.Monitor.DevicePath}]");
             monitor.PropertyChanged -= Monitor_PropertyChanged;
             monitor.Dispose();
             Monitors.Remove(monitor);
@@ -425,7 +448,11 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
     {
         await previous;
         try { await Task.Run(save); }
-        catch { /* Optional persistence must not change a hardware write result. */ }
+        catch (Exception ex)
+        {
+            // Optional persistence must not change a hardware write result.
+            AppLog.Error("state persistence failed", ex);
+        }
     }
 
     private void NotifyMonitorSummaryChanged()

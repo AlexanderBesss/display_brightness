@@ -1,21 +1,30 @@
 using System.Management;
 using DisplayBrightness.Models;
+using DisplayBrightness.Utilities;
 
 namespace DisplayBrightness.Services;
 
 public class WmiBrightnessController : IBrightnessController
 {
+    // Reads run on every refresh cycle, so a broken WMI provider is reported once
+    // per streak rather than once per poll.
+    private readonly FailureStreak _readFailures = new();
+
     public int? GetBrightness(MonitorInfo monitor)
     {
         try
         {
             var scope = new ManagementScope(@"\root\wmi");
             scope.Connect();
-            return ReadCurrentBrightness(
+            int? brightness = ReadCurrentBrightness(
                 scope, GetWmiInstancePrefix(monitor.DevicePath));
+            _readFailures.Cleared();
+            return brightness;
         }
-        catch
+        catch (Exception ex)
         {
+            _readFailures.Report(
+                $"WMI brightness read failed ({monitor.FriendlyName} [{monitor.DevicePath}]): {ex.Message}");
             return null;
         }
     }
@@ -67,8 +76,10 @@ public class WmiBrightnessController : IBrightnessController
             return ConfirmWrite(returnCode, brightness,
                 () => ReadCurrentBrightness(scope, instancePrefix), Thread.Sleep);
         }
-        catch
+        catch (Exception ex)
         {
+            AppLog.Error(
+                $"WMI brightness write failed ({monitor.FriendlyName} [{monitor.DevicePath}] -> {brightness}%)", ex);
             return false;
         }
     }

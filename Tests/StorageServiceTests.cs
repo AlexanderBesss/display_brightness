@@ -3,6 +3,7 @@ using DisplayBrightness.Services;
 
 namespace DisplayBrightness.Tests;
 
+[Collection("ApplicationLog")]
 public sealed class StorageServiceTests
 {
     [Theory]
@@ -135,6 +136,34 @@ public sealed class StorageServiceTests
                 "{ definitely not valid JSON");
 
             Assert.Empty(storage.LoadOledPanelProtectState());
+        }
+        finally
+        {
+            Directory.Delete(testDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void SaveSettings_FailureLeavesTraceInApplicationLog()
+    {
+        string testDirectory = CreateTestDirectory();
+        string settingsPath = Path.Combine(testDirectory, "settings.json");
+
+        try
+        {
+            // A directory named settings.json makes the atomic replace fail.
+            // The save is swallowed by design, but it must leave a trace in
+            // brightness.log: callers treat a swallowed save as success.
+            Directory.CreateDirectory(settingsPath);
+            var storage = new StorageService(settingsPath);
+
+            storage.SaveSettings(new Dictionary<string, int>
+            {
+                [@"monitor\logprobe\instance"] = 42
+            });
+
+            string content = LogProbe.ReadApplicationLog();
+            Assert.Contains($"failed to save {settingsPath}", content);
         }
         finally
         {

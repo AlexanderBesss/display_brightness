@@ -32,9 +32,12 @@ internal static class MonitorIdentityReader
                 }
             }
         }
-        catch
+        catch (Exception ex)
         {
             // Missing identity disables HID control; never guess a USB target.
+            AppLog.Warn(
+                "WMI monitor identity read failed; OLED Care identity unavailable: " +
+                $"{ex.GetType().Name}: {ex.Message}");
         }
         foreach (var duplicate in candidates.Where(m => m.SerialNumber.Length > 0)
             .GroupBy(m => m.SerialNumber, StringComparer.OrdinalIgnoreCase).Where(g => g.Count() > 1))

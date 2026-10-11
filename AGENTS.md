@@ -38,7 +38,7 @@ binary.
 3. **Verify:** the new pid has zero top-level windows and
    `%APPDATA%\Brightness\startup-trace.log` contains no `tray icon unavailable:` line.
 
-- Test: `dotnet test Tests\DisplayBrightness.Tests.csproj -c Debug` (156 tests, ~1 s) —
+- Test: `dotnet test Tests\DisplayBrightness.Tests.csproj -c Debug` (171 tests, ~1 s) —
   works in the workspace since the 2026-10-11 label clear. If it fails with "Access to
   the path ... `obj` ... is denied" (sandboxed shell with a restricted token) or the
   test host dies with `Win32Exception (5)` in `SetParentProcessExitCallback` (Low label
@@ -50,6 +50,13 @@ binary.
 - `%APPDATA%\Brightness\settings.json` — per-monitor brightness settings.
 - `%APPDATA%\Brightness\startup-trace.log`, `startup-error.log` — startup diagnostics.
 - `oled-care-state.json` — **next to the exe**, not in `%APPDATA%`.
+- `brightness.log` (+ `brightness.log.old` after rotation) — application diagnostics
+  (`Services/AppLog.cs`), **next to the exe**: session banners, startup args, display
+  connect/retire, brightness write failures, OLED operations, unhandled exceptions.
+  One event per line (stack traces are flattened); rotates at 1 MiB; writes never
+  throw and open the file with `FileShare.ReadWrite`, so a second running copy — the
+  app has no single-instance guard — or a log viewer that permits writes cannot
+  silence it. Polling failures log once per streak through `Utilities/FailureStreak.cs`.
 
 ## Gotchas
 

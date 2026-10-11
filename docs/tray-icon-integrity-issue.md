@@ -73,10 +73,14 @@ sandbox may re-apply it anyway.
 The same sandbox residue also breaks plain `dotnet build` / `dotnet test` in the
 workspace. Two distinct problems, both Codex-sandbox artifacts:
 
-- `obj\` and `bin\` are owned by `Gaming\CodexSandboxOffline` and grant `GAMING\alexa`
-  nothing. A non-elevated `dotnet build` fails during restore with
-  `Access to the path 'obj\<guid>.tmp' is denied`. The folders can be neither written
-  to nor deleted without elevation. (`Tests\obj`, `Tests\bin`, and `temp` are normal.)
+- `obj\` and `bin\` are owned by `Gaming\CodexSandboxOffline` — a leftover artifact.
+  Their DACL still grants Modify to `NT AUTHORITY\Authenticated Users`, so an ordinary
+  user shell builds there fine; but the agent harness's sandbox runs with a restricted
+  token that lacks those group SIDs, and a sandboxed `dotnet build` fails during
+  restore with `Access to the path 'obj\<guid>.tmp' is denied`. The same restricted
+  token also blocked writes into ordinary folders like `temp\`. The same build from a
+  non-sandboxed, still non-elevated shell succeeds. (`Tests\obj`, `Tests\bin` are
+  normal.)
 - `dotnet test` compiles fine but aborts before running a single test: the test host
   dies with `System.ComponentModel.Win32Exception (5): Access is denied.` inside
   `SetParentProcessExitCallback` (`Process.EnableRaisingEvents`). The Low mandatory
@@ -109,8 +113,9 @@ dotnet test C:\Users\alexa\review-src\Tests\DisplayBrightness.Tests.csproj -c De
 
 156/156 tests pass that way (~1 s). Delete the copy afterwards.
 
-The durable fix is elevation: take ownership of (or delete) `obj\` and `bin\`, and
-`icacls F:\Projects\display_brightness /setintegritylevel Medium` — with the same
+Cleanup: `obj\` and `bin\` are regenerable build artifacts and safe to delete; the
+Low label at the root needs elevation to clear
+(`icacls F:\Projects\display_brightness /setintegritylevel Medium`) — with the same
 caveat as the Fix section above: the agent sandbox may re-apply the artifacts.
 
 ## Related trap: GUID-based registration

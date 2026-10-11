@@ -24,24 +24,26 @@ binary.
    (equivalently `.\Build.bat`). It takes about **3 s** warm — budget 15 s, do not treat
    it as a long-running job. Exit code `0` = success, `1` = failure; the output ends with
    `Build successful!` or `BUILD FAILED:`.
-   A bare `.\Build.ps1` can be refused with "the file is not digitally signed": any file
-   rewritten in this workspace inherits the Low integrity label, and PowerShell treats a
-   Low-IL script as untrusted. `Build.bat` already passes `-ExecutionPolicy Bypass`.
+   The Low integrity label that once made PowerShell refuse rewritten scripts with
+   "the file is not digitally signed" was cleared 2026-10-11; if that message returns,
+   the label was re-applied (see Gotchas). `Build.bat` passes `-ExecutionPolicy Bypass`.
 2. **Restart:** stop the running instance, copy `publish\Brightness.exe` into
    `C:\Users\alexa\AppData\Local\Brightness\`, then start
    `"C:\Users\alexa\AppData\Local\Brightness\Brightness.exe" --startup`. Keep the
    `oled-care-state.json` already in that folder — the running app holds the current
    state; only seed it from `temp\oled-care-state.pre-build-backup.json` when it is
-   missing. That folder is the autostart target and the only place the tray icon works —
-   never restart from `publish\` (see Gotchas).
+   missing. That folder is the autostart target and the canonical place to run from;
+   `publish\` is runnable since the 2026-10-11 label clear, but keep restarting the
+   installed copy (see Gotchas).
 3. **Verify:** the new pid has zero top-level windows and
    `%APPDATA%\Brightness\startup-trace.log` contains no `tray icon unavailable:` line.
 
-- Test: `dotnet test Tests\DisplayBrightness.Tests.csproj -c Debug` (156 tests, ~1 s).
-  If it fails with "Access to the path ... `obj` ... is denied", or the test host dies
-  with `Win32Exception (5)` in `SetParentProcessExitCallback`, the workspace's sandbox
-  artifacts are the cause — robocopy the sources to a folder outside the workspace and
-  test there; see [docs/tray-icon-integrity-issue.md](docs/tray-icon-integrity-issue.md).
+- Test: `dotnet test Tests\DisplayBrightness.Tests.csproj -c Debug` (156 tests, ~1 s) —
+  works in the workspace since the 2026-10-11 label clear. If it fails with "Access to
+  the path ... `obj` ... is denied" (sandboxed shell with a restricted token) or the
+  test host dies with `Win32Exception (5)` in `SetParentProcessExitCallback` (Low label
+  re-applied), see [docs/tray-icon-integrity-issue.md](docs/tray-icon-integrity-issue.md)
+  for the diagnosis and the robocopy-outside-the-tree fallback.
 
 ## Runtime state
 
@@ -51,10 +53,14 @@ binary.
 
 ## Gotchas
 
-- Never launch `publish\Brightness.exe` directly; the workspace folder carries a Low
-  integrity label that makes the shell refuse the tray icon. See
+- The workspace once carried a Low integrity label that made the shell refuse the tray
+  icon for anything run from it; cleared 2026-10-11 (`icacls F:\Projects\display_brightness
+  /setintegritylevel Medium` on the root, then delete-and-recreate of the labeled
+  artifacts). If a `tray icon unavailable:` line reappears, check
+  `icacls F:\Projects\display_brightness` for `Mandatory Label\Low` before
+  re-investigating — the sandbox can re-apply it. See
   [docs/tray-icon-integrity-issue.md](docs/tray-icon-integrity-issue.md) — it also lists
-  the causes already ruled out, so read it before re-investigating a tray-icon failure.
+  the causes already ruled out.
 - The tray icon is registered by window handle plus a non-zero `uID`, deliberately without
   `NIF_GUID`. Do not reintroduce a GUID; the same document explains why.
 - `Build.ps1` stops any instance whose image lives inside `publish\` before cleaning, so a
@@ -78,7 +84,7 @@ windows for its pid and no `tray icon unavailable:` line in `startup-trace.log`.
 ## Docs
 
 - [docs/tray-icon-integrity-issue.md](docs/tray-icon-integrity-issue.md) — tray icon
-  failures, causes ruled out, the GUID trap, and the same sandbox artifacts breaking
-  `dotnet build`/`dotnet test` in the workspace.
+  failures, the Low-integrity-label artifact (cleared 2026-10-11), causes ruled out,
+  the GUID trap, and the same artifacts breaking `dotnet build`/`dotnet test`.
 - [docs/msi-oled-panel-protect-spec.md](docs/msi-oled-panel-protect-spec.md) — MSI OLED
   Care / Panel Protect behaviour.

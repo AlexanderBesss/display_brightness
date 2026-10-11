@@ -63,10 +63,16 @@ C:\Users\alexa\AppData\Local\Brightness\Brightness.exe --startup
 ```
 
 That path is what `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` points at.
-Clearing the label at the source needs an elevated prompt
-(`icacls F:\Projects\display_brightness /setintegritylevel Medium`); a non-elevated shell
-gets "Access is denied" because the mandatory label lives in the SACL, and the agent
-sandbox may re-apply it anyway.
+Clearing the label at the source: `icacls F:\Projects\display_brightness /setintegritylevel Medium`
+— done 2026-10-11 from a **non-elevated** shell; the earlier "needs elevation" note was
+wrong. Label-setting checks `WRITE_OWNER`, which the root's owner (alexa, FullControl)
+has. Child objects created while the Low ACE was in force keep an orphaned inherited
+Low label and cannot be relabeled — their DACL grants only Modify, no `WRITE_OWNER`.
+Delete and recreate them instead: `Build.ps1`/`Build.bat` via `git checkout`, `publish\`
+via a rebuild. Verified after the fix: `publish\Brightness.exe --startup` registers the
+tray icon, and workspace `dotnet test` passes 156/156. The agent sandbox may re-apply
+the label; if symptoms return, check `icacls F:\Projects\display_brightness` for
+`Mandatory Label\Low` before re-investigating.
 
 ## Same artifact, other symptoms: build and test failures (2026-10)
 
@@ -103,7 +109,9 @@ Dead ends, so do not re-investigate:
   splits command-line property values on `;`, so a multi-pattern `DefaultItemExcludes`
   cannot be passed as one argument.
 
-What works: build and test from a copy outside the labeled tree.
+What works: build and test from a copy outside the labeled tree (fallback; no longer
+needed since the 2026-10-11 label clear above — a freshly created `testhost.exe` then
+defaults to Medium and workspace `dotnet test` passes again).
 
 ```
 robocopy F:\Projects\display_brightness C:\Users\alexa\review-src /E ^

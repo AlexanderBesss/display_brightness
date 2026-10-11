@@ -38,6 +38,10 @@ binary.
    `%APPDATA%\Brightness\startup-trace.log` contains no `tray icon unavailable:` line.
 
 - Test: `dotnet test Tests\DisplayBrightness.Tests.csproj -c Debug` (156 tests, ~1 s).
+  If it fails with "Access to the path ... `obj` ... is denied", or the test host dies
+  with `Win32Exception (5)` in `SetParentProcessExitCallback`, the workspace's sandbox
+  artifacts are the cause — robocopy the sources to a folder outside the workspace and
+  test there; see [docs/tray-icon-integrity-issue.md](docs/tray-icon-integrity-issue.md).
 
 ## Runtime state
 
@@ -74,6 +78,7 @@ windows for its pid and no `tray icon unavailable:` line in `startup-trace.log`.
 ## Docs
 
 - [docs/tray-icon-integrity-issue.md](docs/tray-icon-integrity-issue.md) — tray icon
-  failures, causes ruled out, and the GUID trap.
+  failures, causes ruled out, the GUID trap, and the same sandbox artifacts breaking
+  `dotnet build`/`dotnet test` in the workspace.
 - [docs/msi-oled-panel-protect-spec.md](docs/msi-oled-panel-protect-spec.md) — MSI OLED
   Care / Panel Protect behaviour.

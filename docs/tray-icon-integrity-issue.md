@@ -68,6 +68,51 @@ Clearing the label at the source needs an elevated prompt
 gets "Access is denied" because the mandatory label lives in the SACL, and the agent
 sandbox may re-apply it anyway.
 
+## Same artifact, other symptoms: build and test failures (2026-10)
+
+The same sandbox residue also breaks plain `dotnet build` / `dotnet test` in the
+workspace. Two distinct problems, both Codex-sandbox artifacts:
+
+- `obj\` and `bin\` are owned by `Gaming\CodexSandboxOffline` and grant `GAMING\alexa`
+  nothing. A non-elevated `dotnet build` fails during restore with
+  `Access to the path 'obj\<guid>.tmp' is denied`. The folders can be neither written
+  to nor deleted without elevation. (`Tests\obj`, `Tests\bin`, and `temp` are normal.)
+- `dotnet test` compiles fine but aborts before running a single test: the test host
+  dies with `System.ComponentModel.Win32Exception (5): Access is denied.` inside
+  `SetParentProcessExitCallback` (`Process.EnableRaisingEvents`). The Low mandatory
+  label inherited into the test output folder — check with
+  `icacls <output>\testhost.exe`, which shows `Mandatory Label\Low Mandatory Level:(I)(NW)` —
+  makes the test host run at Low integrity, and a Low-IL process cannot open a handle
+  to its Medium-IL `dotnet.exe` parent. Same integrity rule as the tray icon, new
+  victim.
+
+Dead ends, so do not re-investigate:
+
+- It is not WOW64: a 32-bit shell opens the same parent handle fine.
+- It is not the NuGet-cached test host: `%USERPROFILE%\.nuget\packages\microsoft.testplatform.testhost\17.13.0\build\netcoreapp3.1\x86\testhost.x86.exe`
+  has no label. The labeled copy is the one in the project's output folder.
+- `--settings` with `TargetProcessArchitecture=x64` is ignored; the run still uses
+  `testhost.x86`.
+- Redirecting intermediates with `-p:BaseIntermediateOutputPath=...` backfires: once
+  `obj\` is no longer the intermediate path, its stale `obj\Release\**\*.g.cs` files
+  are globbed back into the compile ("already defines a member" errors), and MSBuild
+  splits command-line property values on `;`, so a multi-pattern `DefaultItemExcludes`
+  cannot be passed as one argument.
+
+What works: build and test from a copy outside the labeled tree.
+
+```
+robocopy F:\Projects\display_brightness C:\Users\alexa\review-src /E ^
+  /XD obj bin publish temp review-build .git .vs /XF *.user
+dotnet test C:\Users\alexa\review-src\Tests\DisplayBrightness.Tests.csproj -c Debug
+```
+
+156/156 tests pass that way (~1 s). Delete the copy afterwards.
+
+The durable fix is elevation: take ownership of (or delete) `obj\` and `bin\`, and
+`icacls F:\Projects\display_brightness /setintegritylevel Medium` — with the same
+caveat as the Fix section above: the agent sandbox may re-apply the artifacts.
+
 ## Related trap: GUID-based registration
 
 Registering the icon with `NIF_GUID` makes the identity outlive the process. If an

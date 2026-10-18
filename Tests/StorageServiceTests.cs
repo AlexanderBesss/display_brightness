@@ -151,9 +151,8 @@ public sealed class StorageServiceTests
 
         try
         {
-            // A directory named settings.json makes the atomic replace fail.
-            // The save is swallowed by design, but it must leave a trace in
-            // brightness.log: callers treat a swallowed save as success.
+            // A directory named settings.json makes the atomic replace fail. The save is swallowed
+            // by design but must leave a trace: callers treat a swallowed save as success.
             Directory.CreateDirectory(settingsPath);
             var storage = new StorageService(settingsPath);
 

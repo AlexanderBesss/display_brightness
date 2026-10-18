@@ -6,10 +6,8 @@ using System.Windows.Threading;
 namespace DisplayBrightness.ViewModels;
 
 /// <summary>
-/// Owns one monitor's Panel Protect bookkeeping: the last protect run, the
-/// notification latched from the scaler-event register, the panel hours the
-/// elapsed-time text is measured against, and the two polls that keep them
-/// current. The view model stays a thin binding surface over this state.
+/// One monitor's Panel Protect state — last protect run, notification latched from
+/// the scaler-event register, panel hours — plus the two polls that keep it current.
 /// </summary>
 internal sealed class PanelProtectTracker : IDisposable
 {
@@ -92,10 +90,7 @@ internal sealed class PanelProtectTracker : IDisposable
     public bool IsHistoryTimerRunning => _historyTimer?.IsEnabled == true;
     public bool IsEventTimerRunning => _eventTimer?.IsEnabled == true;
 
-    /// <summary>
-    /// Starts the two polling timers. Must run on the thread that owns the
-    /// dispatcher the timers should tick on.
-    /// </summary>
+    /// <summary>Must run on the thread owning the dispatcher the timers should tick on.</summary>
     public void Start()
     {
         RefreshText();
@@ -116,9 +111,8 @@ internal sealed class PanelProtectTracker : IDisposable
     }
 
     /// <summary>
-    /// Records that a Panel Protect routine was accepted by the monitor just now.
-    /// The notification that prompted it is cleared and ignored until the scaler
-    /// event register reports no event again.
+    /// Clears the notification that prompted the run and ignores that event type
+    /// until the scaler event register reports no event again.
     /// </summary>
     public void RecordProtectStarted()
     {
@@ -135,14 +129,11 @@ internal sealed class PanelProtectTracker : IDisposable
         }
         catch
         {
-            // History is optional and must not turn a successfully sent
-            // panel-protect command into an application error.
+            // A failed history save must not turn a sent panel-protect command into an error.
         }
     }
 
-    /// <summary>
-    /// Adopts the panel hours reported by a full OLED status read.
-    /// </summary>
+    /// <summary>Adopts panel hours from a full OLED status read.</summary>
     public void SetUsageHours(int? totalUsageHours)
     {
         if (_totalUsageHours == totalUsageHours)
@@ -204,9 +195,7 @@ internal sealed class PanelProtectTracker : IDisposable
         }
         catch (Exception ex)
         {
-            // A notification poll is advisory. Keep a previously latched
-            // notification and silently retry on the next timer tick. The poll
-            // runs every second, so log only the first failure of a streak.
+            // Advisory poll: keep any latched notification and retry on the next tick.
             _eventPollFailures.Report(
                 $"Panel Protect event poll failed for {_monitor.FriendlyName} " +
                 $"[{_monitor.DevicePath}]: {ex.Message}");
@@ -245,8 +234,7 @@ internal sealed class PanelProtectTracker : IDisposable
         }
         catch (Exception ex)
         {
-            // Keep the last known monitor value and retry on the next tick;
-            // log only the first failure of a streak.
+            // Keeps the last known panel hours and retries on the next tick.
             _usageHoursFailures.Report(
                 $"panel hours read failed for {_monitor.FriendlyName} " +
                 $"[{_monitor.DevicePath}]: {ex.Message}");

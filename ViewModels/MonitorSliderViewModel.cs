@@ -38,11 +38,8 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
 
     internal long BrightnessRevision { get; private set; }
     /// <summary>
-    /// True once this display has answered a brightness read (or arrived with a
-    /// readable initial value). Unlike <see cref="CanAdjustBrightness"/> it is not
-    /// cleared when the display goes into the Unavailable state, so the read
-    /// pipeline keeps giving a transiently silent panel the retry it paid while
-    /// healthy, while a display that never answers still pays no retry delay.
+    /// Set once a brightness read succeeded. Unlike <see cref="CanAdjustBrightness"/> it
+    /// survives the Unavailable state, so a transiently silent panel keeps getting its retry.
     /// </summary>
     internal bool HasDemonstratedBrightness => _hasDemonstratedBrightness;
     internal MonitorInfo Monitor => _monitor;
@@ -248,8 +245,7 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
             _wheelRemainder = 0;
             return Task.FromResult(false);
         }
-        // Precision touchpads emit fractions of the standard 120-unit notch.
-        // Preserve those fractions rather than multiplying every tiny event by 3%.
+        // Precision touchpads emit fractions of a notch; see WheelNotch.
         _wheelRemainder += delta;
         int notches = _wheelRemainder / WheelNotch.DetentUnits;
         _wheelRemainder %= WheelNotch.DetentUnits;
@@ -278,9 +274,8 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
                 try { success = await _commitBrightness(brightness); }
                 catch (Exception ex)
                 {
-                    // The commit pipeline logs its own failures; this only fires
-                    // when the injected callback itself throws, so the wording is
-                    // deliberately different from that site.
+                    // Only the injected callback throws here; the commit pipeline logs its
+                    // own failures, hence the deliberately different wording.
                     success = false;
                     AppLog.Warn(
                         $"brightness commit callback threw for {DisplayName} [{_monitor.DevicePath}] -> {brightness}%", ex);
@@ -301,8 +296,7 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
                     failures++;
                     if (_pendingBrightness == null && failures < WriteAttemptsBeforeReverting)
                     {
-                        // One paced retry for a transient failure. Newer input
-                        // arriving during the delay replaces this value.
+                        // One paced retry; newer input during the delay overwrites this value.
                         _pendingBrightness = brightness;
                     }
                     else if (_pendingBrightness == null)
@@ -312,8 +306,7 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
                             $"{brightness}%; reverted to {_committedBrightness}%");
                         BrightnessValue = _committedBrightness;
                         BrightnessStatusText = "Brightness could not be changed. Try adjusting it again.";
-                        // A rejected write does not erase demonstrated support.
-                        // Only a failed discovery/read or disconnect disables it.
+                        // A rejected write does not clear demonstrated support; only a failed read or disconnect does.
                     }
                 }
             }
@@ -380,11 +373,9 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        // A display that is still enumerated but unreadable has usually just
-        // timed out on DDC/CI. Keep the last known value and the controls through
-        // one failure, so a single timeout cannot take the slider away from a
-        // monitor that was working moments earlier. The counter only counts while
-        // the controls are up; a reconnect or a lost control resets it.
+        // Still enumerated but unreadable usually means a DDC/CI timeout: keep the last value
+        // and the controls through one failure. The counter only counts while the controls are
+        // up — a reconnect or a lost control resets it.
         if (!reconnecting && CanAdjustBrightness)
         {
             _failedReads++;
@@ -430,8 +421,6 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
         }
         catch (Exception ex)
         {
-            // Refreshed with every reading cycle: report the first failure of a
-            // streak rather than one line per cycle.
             _oledReadFailures.Report(
                 $"OLED status read failed for {DisplayName} [{_monitor.DevicePath}]: {ex.Message}");
             if (!_isDisposed)

@@ -8,8 +8,7 @@ public sealed class AppLogTests
     [Fact]
     public void LogFilePath_FollowsTheNextToTheExecutableConvention()
     {
-        // Pins the documented convention: the log sits beside the exe, like
-        // oled-care-state.json, not in %APPDATA% beside settings.json.
+        // The log sits beside the exe, not in %APPDATA% beside settings.json.
         string path = AppLog.LogFilePath;
 
         Assert.True(Path.IsPathRooted(path));
@@ -87,9 +86,8 @@ public sealed class AppLogTests
         string path = NewLogPath();
         try
         {
-            // A second running copy of the app can hold the log open for writing.
-            // ReadWrite sharing keeps both copies logging instead of letting the
-            // swallowed IOException silence one of them.
+            // A second running copy can hold the log open; ReadWrite sharing keeps both copies
+            // logging instead of the swallowed IOException silencing one of them.
             using var otherWriter = new FileStream(
                 path,
                 FileMode.OpenOrCreate,
@@ -175,15 +173,13 @@ public sealed class AppLogTests
         string missingDirectory = Path.Combine(
             Path.GetTempPath(), $"BrightnessLogTests-missing-{Guid.NewGuid():N}");
 
-        // Must not throw even though the directory does not exist.
         AppLog.Append(Path.Combine(missingDirectory, "brightness.log"), "line");
     }
 
     [Fact]
     public void Error_FormatsExceptionTypeAndMessage()
     {
-        // AppLog writes to the fixed path next to the running executable, so this
-        // exercises the public entry point and asserts on that file.
+        // AppLog's path is fixed next to the running exe, so this asserts on that file.
         string marker = Guid.NewGuid().ToString("N");
 
         AppLog.Error($"boom {marker}", new InvalidOperationException("inner boom"));

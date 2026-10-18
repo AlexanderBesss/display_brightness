@@ -3,11 +3,9 @@ using DisplayBrightness.Services;
 namespace DisplayBrightness.Utilities;
 
 /// <summary>
-/// Logs the first failure of a run of failures and stays quiet until an attempt
-/// succeeds again. Polling code calls <see cref="Report"/> on every failure and
-/// <see cref="Cleared"/> on every success, so one permanently broken device
-/// cannot write a line per poll into the rotating log.
-/// Best-effort by design: a race between threads costs at most one extra line.
+/// Logs the first failure of a run and stays quiet until an attempt succeeds again, so a
+/// permanently broken device cannot write a line per poll. Best-effort: a race between
+/// threads costs at most one extra line.
 /// </summary>
 internal sealed class FailureStreak
 {

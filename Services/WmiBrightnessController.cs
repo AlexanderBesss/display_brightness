@@ -6,8 +6,6 @@ namespace DisplayBrightness.Services;
 
 public class WmiBrightnessController : IBrightnessController
 {
-    // Reads run on every refresh cycle, so a broken WMI provider is reported once
-    // per streak rather than once per poll.
     private readonly FailureStreak _readFailures = new();
 
     public int? GetBrightness(MonitorInfo monitor)
@@ -52,9 +50,8 @@ public class WmiBrightnessController : IBrightnessController
                 var target = methods.FirstOrDefault(method =>
                     InstanceMatches(method, instancePrefix));
 
-                // Some display drivers omit enough of the instance identifier to make
-                // an exact match impossible. A single active laptop panel is still an
-                // unambiguous target.
+                // Some drivers omit enough of the instance id for an exact match; a single
+                // active panel is still an unambiguous target.
                 target ??= methods.Count == 1 ? methods[0] : null;
                 if (target == null)
                     return false;
@@ -87,14 +84,12 @@ public class WmiBrightnessController : IBrightnessController
     internal static bool ConfirmWrite(uint? returnCode, int requested,
         Func<int?> readBrightness, Action<TimeSpan> wait)
     {
-        // WmiSetBrightness's documented result is authoritative. CurrentBrightness
-        // can lag behind a successful write, especially during continuous input.
+        // WmiSetBrightness's documented result is authoritative; CurrentBrightness can lag a write.
         if (returnCode.HasValue)
             return returnCode.Value == 0;
 
-        // Some drivers omit ReturnValue. Give their readback a bounded settling
-        // period instead of failing on the first stale sample. This runs on the
-        // brightness worker, never the dispatcher thread.
+        // Drivers that omit ReturnValue get a bounded settling period instead of failing on the
+        // first stale sample. This runs on the brightness worker, never the dispatcher thread.
         for (int attempt = 0; attempt < 6; attempt++)
         {
             if (attempt > 0)

@@ -215,8 +215,7 @@ public static class DisplayInterop
         public string viewGdiDeviceName;
     }
 
-    // Only the fields required for the refresh-rate lookup are declared.
-    // dmSize sits at offset 68 and dmDisplayFrequency at offset 184.
+    // Partial DEVMODEW: only the fields the refresh-rate lookup needs are declared.
     [StructLayout(LayoutKind.Explicit, Size = 188)]
     public struct DEVMODEW
     {
@@ -332,8 +331,7 @@ public static class DisplayInterop
         }
     }
 
-    // Read target info from raw bytes at known offsets. The refresh rate is
-    // the target's current mode, expressed as a rational (numerator/denominator).
+    // Reads target info at raw offsets; the refresh rate is the target's current mode as a rational.
     public static (ulong adapterId, uint targetId, uint outputTechnology,
         uint refreshNumerator, uint refreshDenominator)
         ReadTargetInfoRaw(IntPtr pathPtr, int pathIndex, int pathSize)
@@ -349,8 +347,7 @@ public static class DisplayInterop
             refreshNumerator, refreshDenominator);
     }
 
-    // Actual refresh rate (Hz) of the current mode on a GDI device such as
-    // "\\.\DISPLAY1". Returns 0 when the rate cannot be determined.
+    // Refresh rate (Hz) of the current mode on a GDI device such as "\\.\DISPLAY1"; 0 when unknown.
     public static double GetDeviceRefreshRateHz(string deviceName)
     {
         var devMode = new DEVMODEW

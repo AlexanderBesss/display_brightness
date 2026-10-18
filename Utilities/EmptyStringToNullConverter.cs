@@ -5,9 +5,8 @@ using System.Windows.Data;
 namespace DisplayBrightness.Utilities;
 
 /// <summary>
-/// Maps an empty string to <see langword="null"/>. WPF pops a tooltip for any non-null
-/// content, so a bound status string that is empty shows a blank tooltip box; null is
-/// what suppresses it.
+/// Maps an empty string to <see langword="null"/>: WPF pops a tooltip for any non-null
+/// content, so an empty bound status string shows a blank tooltip box and only null suppresses it.
 /// </summary>
 [ValueConversion(typeof(string), typeof(string))]
 internal sealed class EmptyStringToNullConverter : IValueConverter

@@ -4,10 +4,9 @@ using DisplayBrightness.Models;
 namespace DisplayBrightness.Services;
 
 /// <summary>
-/// Controls external monitors through the Windows physical-monitor APIs.
-/// Those APIs carry MCCS/DDC/CI commands over the display connection; DDC/CI
-/// monitors are not generic HID devices and cannot be controlled by writing an
-/// arbitrary HID output report.
+/// External monitors through the Windows physical-monitor APIs, which carry MCCS/DDC/CI
+/// commands over the display connection: DDC/CI monitors are not generic HID devices and
+/// cannot be driven by writing an arbitrary HID output report.
 /// </summary>
 public class BrightnessController : IBrightnessController
 {

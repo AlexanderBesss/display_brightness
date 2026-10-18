@@ -1,9 +1,6 @@
 namespace DisplayBrightness.Services;
 
-/// <summary>
-/// The MSI monitor's USB (HID) text protocol: a one-byte verb, a five-character
-/// feature code, an optional value, and a carriage return.
-/// </summary>
+/// <summary>MSI USB (HID) text protocol: a one-byte verb, a five-character feature code, an optional value, and a CR.</summary>
 internal static class MsiProtocol
 {
     public const string GetVerb = "58";

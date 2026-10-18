@@ -4,10 +4,8 @@ using DisplayBrightness.Services;
 namespace DisplayBrightness.Tests;
 
 /// <summary>
-/// Reads the application log written next to the running test host. AppLog
-/// rotates at 1 MiB, and the file accumulates across runs, so a line written
-/// during a test can land in either the active or the rotated file by the time
-/// the test reads it back.
+/// Reads the application log beside the running test host, active and rotated files both: AppLog
+/// rotates at 1 MiB and accumulates across runs, so a line written by a test can land in either.
 /// </summary>
 internal static class LogProbe
 {

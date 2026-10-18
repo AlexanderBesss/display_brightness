@@ -34,11 +34,9 @@ internal sealed class NativeTrayIcon : NativeWindow, IDisposable
     private const ushort RawMouseWheel = 0x0400;
     private const uint RawInputError = uint.MaxValue;
 
-    // The icon is identified by this window plus a non-zero id. A GUID would
-    // survive the process: if an instance ends without removing the icon, the
-    // shell keeps refusing that GUID for every later instance, and claiming a
-    // replacement GUID makes Windows treat it as a brand new icon and hide it
-    // in the notification-area overflow.
+    // Window handle plus a non-zero id, deliberately without NIF_GUID: a leaked GUID is refused
+    // by the shell forever, and a replacement GUID lands in the overflow. See
+    // docs/tray-icon-integrity-issue.md.
     private const uint IconId = 1;
 
     private readonly uint _taskbarCreatedMessage;
@@ -162,9 +160,8 @@ internal sealed class NativeTrayIcon : NativeWindow, IDisposable
 
     internal static bool IsDisplayConfigurationMessage(int message, long eventCode) =>
         message == 0x007E || // WM_DISPLAYCHANGE
-        // DBT_DEVICEINTERFACE (0x0018) plus arrival/removal of a volume or device.
-        // DBT_DEVNODES_CHANGED (0x0007) is deliberately excluded: it fires for any
-        // device node change, including audio and USB storage, and is not a display event.
+        // DBT_DEVICEINTERFACE (0x0018) plus arrival/removal. DBT_DEVNODES_CHANGED (0x0007) is
+        // excluded: it fires for any device node change, including audio and USB storage.
         (message == 0x0219 && eventCode is 0x0018 or 0x8000 or 0x8004) || // WM_DEVICECHANGE
         (message == 0x0218 && eventCode is 0x0007 or 0x0012); // resume / automatic resume
 

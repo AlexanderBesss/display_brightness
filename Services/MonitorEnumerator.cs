@@ -9,13 +9,11 @@ public class MonitorEnumerator
 {
     private const uint MaxDisplayDevices = 16;
 
-    // EnumDisplayDevices flag: report each child's DeviceID as its device
-    // interface path instead of a raw instance id.
+    // EnumDisplayDevices flag: children report a device interface path, not a raw instance id.
     private const uint EddGetDeviceInterfaceName = 1;
 
-    // A monitor that fails to parse vanishes from the UI with no other trace, so
-    // the first sighting of each broken identity is logged once per process.
-    // Enumeration runs on a timer, so logging every sighting would bury the log.
+    // A monitor that fails to parse vanishes from the UI with no other trace, so each broken
+    // identity is logged once per process; enumeration runs on a timer and would bury the log.
     private const int MaxLoggedParseFailures = 32;
 
     private static readonly ConcurrentDictionary<string, FailureStreak> StrategyFailures = new();
@@ -67,8 +65,6 @@ public class MonitorEnumerator
         }
         catch (Exception ex)
         {
-            // The fallback chain retries on every refresh cycle: report the first
-            // failure of a streak, not one line per cycle.
             failures.Report(
                 $"monitor enumeration strategy {strategy} failed: {ex.GetType().Name}: {ex.Message}");
             monitors = new List<MonitorInfo>();
@@ -76,10 +72,6 @@ public class MonitorEnumerator
         }
     }
 
-    /// <summary>
-    /// Logs one line per broken monitor identity per process, so a driver that
-    /// consistently fails to parse cannot write a line per enumeration cycle.
-    /// </summary>
     private static void ReportParseFailure(string site, string identity)
     {
         lock (LoggedParseFailuresGate)
@@ -150,10 +142,7 @@ public class MonitorEnumerator
         return monitors;
     }
 
-    /// <summary>
-    /// Maps each GDI device name (<c>\\.\DISPLAYn</c>) to the monitor identity
-    /// behind it, so an EnumDisplayMonitors hit can be matched to its instance id.
-    /// </summary>
+    /// <summary>Maps each GDI device name (<c>\\.\DISPLAYn</c>) to the identity behind it, to match an EnumDisplayMonitors hit to its instance id.</summary>
     private static Dictionary<string, MonitorDeviceDescription> BuildDeviceNameMap()
     {
         var map = new Dictionary<string, MonitorDeviceDescription>(
@@ -262,8 +251,7 @@ public class MonitorEnumerator
                             pathPtr, (int)i,
                             Marshal.SizeOf<DisplayInterop.DISPLAYCONFIG_PATH_INFO>());
 
-                    // Keep every currently supported connector type, including
-                    // USB-C/indirect wired displays and internal panels.
+                    // Keep every supported connector type, including USB-C/indirect wired displays and internal panels.
                     if (outputTech >
                             DisplayInterop.DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DISPLAYPORT_USB_TUNNEL &&
                         outputTech !=

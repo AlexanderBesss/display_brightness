@@ -40,9 +40,9 @@ internal interface IMsiHidTransport
 }
 
 /// <summary>
-/// Sends MSI protocol commands to the USB interface of one specific display.
-/// Every call first identifies the candidate devices by their chassis serial so
-/// a command can never reach a different monitor that shares the VID/PID.
+/// MSI protocol commands to the USB interface of one specific display; candidates are
+/// matched by chassis serial first, so a command cannot reach another monitor that
+/// shares the VID/PID.
 /// </summary>
 internal sealed class MsiHidTransport : IMsiHidTransport
 {
@@ -201,10 +201,8 @@ internal sealed class MsiHidTransport : IMsiHidTransport
         HidOperationResult? LastFailure);
 
     /// <summary>
-    /// Returns the candidate interfaces whose chassis serial matches, plus the
-    /// last probe failure so the caller can report why nothing matched.
-    /// Identification is GET-only: no status or write command may reach a device
-    /// until its serial matches the selected display.
+    /// Interfaces whose chassis serial matches, plus the last probe failure so the caller can
+    /// report why nothing matched. GET-only: no status or write command before a serial matches.
     /// </summary>
     private async Task<IdentityProbeOutcome> SelectDevicesBySerialAsync(
         List<string> paths,
@@ -234,11 +232,8 @@ internal sealed class MsiHidTransport : IMsiHidTransport
 
         if (matches.Count == 0 && paths.Count == 1 && identityProbeSucceeded)
         {
-            // Some monitors expose an EDID factory serial through WMI but a
-            // different chassis serial through the MSI HID register. With exactly
-            // one responsive VID/PID candidate there is no device ambiguity, so
-            // use that candidate. Never apply this fallback when multiple
-            // interfaces are present.
+            // Some monitors report an EDID factory serial through WMI but a different chassis
+            // serial over HID; with one responsive candidate there is no ambiguity to resolve.
             matches.Add(paths[0]);
             lastFailure = null;
         }
@@ -253,10 +248,7 @@ internal sealed class MsiHidTransport : IMsiHidTransport
         MsiProtocol.SerialNumberFeatureCode,
         MsiProtocol.ReplyVerb);
 
-    /// <summary>
-    /// A blank or all-zero EDID serial means the display never reported one, so
-    /// there is no way to prove which interface belongs to it.
-    /// </summary>
+    /// <summary>A blank or all-zero EDID serial means the display never reported one, so no interface can be proven to belong to it.</summary>
     private static bool HasUsableSerial(string monitorSerialNumber)
     {
         string serial = monitorSerialNumber.Trim();

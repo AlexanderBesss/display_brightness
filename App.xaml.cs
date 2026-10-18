@@ -58,17 +58,15 @@ public partial class App : System.Windows.Application
         }
     }
 
-    // Log only: the default crash behaviour is unchanged. These handlers exist so
-    // failures that reach the top of the dispatcher, a background thread, or an
-    // unawaited task leave a trace in brightness.log.
+    // Log only: default crash behaviour is unchanged, so that failures reaching the top
+    // of the dispatcher, a background thread, or an unawaited task leave a brightness.log trace.
     private void RegisterGlobalExceptionHandlers()
     {
         DispatcherUnhandledException += (_, args) =>
             AppLog.Error("unhandled dispatcher exception", args.Exception);
         AppDomain.CurrentDomain.UnhandledException += (_, args) =>
         {
-            // A throw can carry something that is not an Exception; keep its text
-            // instead of losing the payload to a failed cast.
+            // ExceptionObject is not always an Exception; log its text instead of losing it to a cast.
             if (args.ExceptionObject is Exception exception)
                 AppLog.Error("unhandled runtime exception", exception);
             else
@@ -87,9 +85,8 @@ public partial class App : System.Windows.Application
             $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {exception.GetType().Name}: {exception.Message}" +
             $"{Environment.NewLine}{exception.StackTrace}{Environment.NewLine}{Environment.NewLine}");
 
-    // Both logs live under %APPDATA%. A process running at Low integrity cannot write
-    // there, which is one of the cases these logs exist to record; the write then fails
-    // quietly and the UI is the only remaining signal.
+    // Both logs live under %APPDATA%, which a Low-integrity process cannot write — one of the
+    // cases they exist to record; the failed write is quiet, leaving the UI as the only signal.
     private static void AppendToLog(string fileName, string text)
     {
         try
@@ -98,7 +95,6 @@ public partial class App : System.Windows.Application
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Brightness");
             Directory.CreateDirectory(directory);
             string path = Path.Combine(directory, fileName);
-            // FileInfo.Length throws when the file does not exist yet, so check first.
             if (File.Exists(path) && new FileInfo(path).Length > LogSoftLimitBytes)
                 File.WriteAllText(path, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} log trimmed{Environment.NewLine}");
             File.AppendAllText(path, text + Environment.NewLine);
@@ -116,9 +112,8 @@ public partial class App : System.Windows.Application
 
         var viewModel = (MainWindowViewModel)_mainWindow.DataContext;
 
-        // The shell can refuse the icon, for example when it cannot open this
-        // process to copy the icon handle. That costs the tray affordance only,
-        // so keep the window on screen instead of refusing to start.
+        // The shell can refuse the icon, for example when it cannot open this process to
+        // copy the icon handle; that costs the tray affordance only, so the window stays.
         bool trayAvailable;
         try
         {
@@ -164,9 +159,8 @@ public partial class App : System.Windows.Application
 
         _mainWindow.Deactivated += (_, _) =>
         {
-            // Clicking the tray icon can briefly return activation to Explorer
-            // after the popup is shown. Preserve the original synchronous guard
-            // so that transient deactivation cannot immediately hide it again.
+            // Clicking the tray icon can briefly hand activation back to Explorer, so a
+            // transient deactivation must not hide the popup: the guard stays synchronous.
             if (_trayIcon?.IsPointOverIcon(
                     System.Windows.Forms.Cursor.Position) == true ||
                 _trayMenu?.IsOpen == true)

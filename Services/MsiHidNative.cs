@@ -4,8 +4,8 @@ using Microsoft.Win32.SafeHandles;
 namespace DisplayBrightness.Services;
 
 /// <summary>
-/// Raw HID plumbing: device-interface enumeration by VID/PID, opening a device,
-/// and reading its report sizes. No MSI protocol knowledge lives here.
+/// Raw HID plumbing: interface enumeration by VID/PID, opening a device, report sizes.
+/// No MSI protocol knowledge lives here.
 /// </summary>
 internal static class MsiHidNative
 {
@@ -84,10 +84,7 @@ internal static class MsiHidNative
         return paths;
     }
 
-    /// <summary>
-    /// Reads one device interface's path. The detail buffer is allocated twice:
-    /// first to learn the size, then to hold the path itself.
-    /// </summary>
+    /// <summary>SetupDi is called twice: the first call learns the detail-buffer size.</summary>
     private static bool TryGetInterfacePath(
         IntPtr deviceInfoSet,
         ref SpDeviceInterfaceData interfaceData,

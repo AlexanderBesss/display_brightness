@@ -128,10 +128,9 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
         TimeSpan elapsed = now - _lastAutomaticRefreshAtUtc;
         bool isStale = elapsed < TimeSpan.Zero || elapsed >= AutomaticRefreshInterval;
 
-        // Opening the popup is an explicit request for control, so a display that
-        // currently looks unusable is re-read even inside the throttle window. The
-        // floor keeps that from turning every click into a full DDC/CI sweep when a
-        // monitor is permanently unreadable.
+        // Opening the popup is an explicit request for control, so an unusable display is
+        // re-read inside the throttle window; ForcedRefreshFloor keeps that from turning
+        // every click into a full DDC/CI sweep on a permanently unreadable monitor.
         bool retryUnavailable = forceWhenUnavailable && !CanAdjustBrightness &&
             now - _lastForcedRefreshAtUtc >= ForcedRefreshFloor;
         if (isStale || retryUnavailable)
@@ -224,18 +223,15 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
 
     private async Task<List<MonitorReading>> ReadMonitorsAsync()
     {
-        // Snapshot on the calling (UI) thread: the read loop below runs on a worker
-        // thread and must not walk a collection the UI thread mutates.
-        // Demonstrated support, not current health, decides the retry: a row that
-        // slipped into Unavailable on a wake-up timeout is exactly the case that
-        // needs the retry, while a display that has never answered still pays none.
+        // Snapshot on the UI thread: the read loop below runs on a worker and must not walk
+        // a collection the UI thread mutates. Demonstrated support, not current health, picks
+        // who gets the retry — see ReadBrightnessWithRetryAsync.
         HashSet<string> retryOnFailure = Monitors
             .Where(monitor => monitor.HasDemonstratedBrightness)
             .Select(monitor => monitor.Monitor.DevicePath)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        // A freshly (re)created row has no reading history, but a stored brightness
-        // is evidence this physical display answered DDC/CI in an earlier session —
-        // typically a reconnect after the link retrained and changed the device path.
+        // A fresh row has no reading history, but a stored brightness means this physical
+        // display answered DDC/CI before — typically a reconnect on a changed device path.
         foreach (string devicePath in _savedSettings.Keys)
             retryOnFailure.Add(devicePath);
 
@@ -267,11 +263,9 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
         if (brightness.HasValue || !retryOnFailure.Contains(monitor.DevicePath))
             return brightness;
 
-        // A DDC/CI read can time out on a panel that is waking or retraining its
-        // link. One paced retry keeps a transient timeout from taking control away
-        // from a display that was answering a moment ago — and from one that lost
-        // control to exactly such a timeout. A display that has never answered is
-        // not retried, so it does not pay the delay every cycle.
+        // A waking or link-retraining panel can time out a single DDC/CI read; one paced
+        // retry keeps that from taking control away from a display that was answering.
+        // Displays that have never answered are excluded above, so they pay no delay.
         await Task.Delay(BrightnessReadRetryDelay, _lifetime.Token);
         return TryReadBrightness(monitor);
     }
@@ -484,8 +478,8 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
             monitor.PropertyChanged -= Monitor_PropertyChanged;
             monitor.Dispose();
         }
-        // In-flight native calls are not cancellable. Their continuations still
-        // need the semaphore and cancellation source after the view is closed.
+        // _lifetime and _displayIo outlive the view: in-flight native calls are not
+        // cancellable and their continuations still need them.
         GC.SuppressFinalize(this);
     }
 

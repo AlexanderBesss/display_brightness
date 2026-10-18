@@ -8,8 +8,7 @@ public sealed class DisplayInteropTests
     [Fact]
     public void ChildEnumeration_PreservesTheParentDeviceName()
     {
-        // Read-only Windows API smoke test: compare the production import with
-        // an explicitly UTF-16 import. No DDC, WMI brightness, or HID commands.
+        // Read-only API smoke test: production import against an explicit UTF-16 import; no DDC, WMI brightness, or HID commands.
         for (uint index = 0; index < 16; index++)
         {
             var adapter = NewDevice();

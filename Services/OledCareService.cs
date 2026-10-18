@@ -4,9 +4,8 @@ namespace DisplayBrightness.Services;
 
 public sealed class OledCareService : IOledCareService
 {
-    // The monitor continues its on-device routine for several minutes after
-    // the command is accepted. Seven minutes is the observed duration on the
-    // supported MSI OLED panel.
+    // The monitor keeps running its on-device routine after the command is accepted; seven
+    // minutes is the observed duration on the supported MSI OLED panel.
     public static readonly TimeSpan PanelProtectRoutineDuration =
         TimeSpan.FromMinutes(7);
 
@@ -136,9 +135,8 @@ public sealed class OledCareService : IOledCareService
             DescribePanelProtectEvent(eventType));
     }
 
-    // The 00170 register reports the refresh rate mod 256, so a 360 Hz mode
-    // reads 104. Pick the candidate (raw + 256k) closest to the OS-reported
-    // rate so >255 Hz modes resolve correctly.
+    // 00170 reports the refresh rate mod 256, so 360 Hz reads 104; pick the candidate
+    // raw + 256k closest to the OS-reported rate to resolve >255 Hz modes correctly.
     internal static int? ResolveRefreshRate(string? rawValue, double osHz)
     {
         if (!int.TryParse(rawValue, out int value) || value < 0)
@@ -193,8 +191,7 @@ public sealed class OledCareService : IOledCareService
         if (profile == null)
             return new PixelRefreshResult(false, "OLED Care is not supported for this display.");
 
-        // Fire and forget, matching MSI Gaming Intelligence: the firmware
-        // withholds the ack while the panel protect routine runs.
+        // Fire and forget, as MSI Gaming Intelligence does: the firmware withholds the ack while the routine runs.
         HidOperationResult result = await _transport.SetNoAckAsync(
             profile.HidVendorId,
             profile.HidProductIds,

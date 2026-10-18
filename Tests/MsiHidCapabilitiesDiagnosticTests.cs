@@ -45,8 +45,7 @@ public sealed class MsiHidCapabilitiesDiagnosticTests
             }
         }
 
-        // This is a hardware diagnostic, not a requirement for running the
-        // portable unit-test suite (including on CI without an MSI monitor).
+        // A hardware diagnostic, not a requirement for the portable suite (CI has no MSI monitor).
     }
 
     [Fact]

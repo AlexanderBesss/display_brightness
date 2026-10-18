@@ -39,8 +39,7 @@ public class StorageService : IStorageService
         }
         catch (Exception ex)
         {
-            // Settings are optional. A read-only or unavailable roaming profile
-            // must not prevent brightness control from starting.
+            // Settings are optional; a read-only or unavailable roaming profile must not block startup.
             AppLog.Warn($"settings folder/legacy migration failed: {ex.Message}");
         }
 
@@ -301,8 +300,7 @@ public class StorageService : IStorageService
             }
             catch (Exception ex)
             {
-                // Persistence is optional, but a failure must leave a trace:
-                // callers treat a swallowed save as success.
+                // Persistence is optional, but callers treat a swallowed save as success, so it must leave a trace.
                 AppLog.Error($"failed to save {destinationPath}", ex);
             }
             finally
@@ -315,8 +313,7 @@ public class StorageService : IStorageService
                     }
                     catch (Exception ex)
                     {
-                        // A leftover temp file is harmless, but it accumulates and
-                        // is confusing without a trace of why it could not go.
+                        // A leftover temp file is harmless but accumulates, so leave a trace of why it stayed.
                         AppLog.Warn($"could not remove temporary file {tempPath}: {ex.Message}");
                     }
                 }

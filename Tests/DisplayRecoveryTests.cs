@@ -236,9 +236,8 @@ public sealed class DisplayRecoveryTests
         await vm.RefreshIfStaleAsync();
         Assert.False(vm.CanAdjustBrightness);
 
-        // A panel that NAKs the first message after the bus idles but answers the
-        // retry must recover without the user clicking Refresh: the retry a healthy
-        // row paid is still paid while the row is Unavailable.
+        // A panel that NAKs the first message after the bus idles but answers the retry must
+        // recover without a click: an Unavailable row still pays the retry it paid while healthy.
         int attempts = 0;
         display.Read = _ => Interlocked.Increment(ref attempts) == 1 ? null : 66;
         time.Now += TimeSpan.FromMinutes(1);
@@ -251,10 +250,8 @@ public sealed class DisplayRecoveryTests
     [Fact]
     public async Task StartupReadFailure_IsRetriedWhenTheDisplayHasAStoredBrightness()
     {
-        // A reconnect that changed the device path produces a brand-new row whose
-        // first read can time out while the panel wakes. The stored brightness from
-        // the previous session marks this physical display as one that answers
-        // DDC/CI, so the initial failure gets the paced retry.
+        // A reconnect on a changed device path gives a brand-new row whose first read can time out
+        // while the panel wakes; the stored brightness marks that display as one that answers DDC/CI.
         var storage = new FakeStorage { Settings = { ["A"] = 40 } };
         var display = new FakeDisplay();
         int attempts = 0;

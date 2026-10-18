@@ -14,6 +14,27 @@ tray icon. `net8.0-windows`, `AssemblyName=Brightness`, `RootNamespace=DisplayBr
 - `Tests/` — separate xunit project (`Tests/DisplayBrightness.Tests.csproj`); the main
   csproj excludes `Tests\**\*.cs`, so tests never compile into the app.
 
+## Comments
+
+Write comments for the next agent reading the file cold, and keep only those that carry
+information the code cannot show: an invariant that must hold, a trap, an ordering or
+lifetime constraint, a "why not" decision that looks like an omission, or a pointer to the
+doc that explains it. If deleting the comment loses nothing for a competent reader, delete
+it — comments that only restate the code cost future readers attention.
+
+- No narration of what the code plainly does, and no prose restatement of a name: no
+  `// Set the brightness` above `SetBrightness(...)`, no `// Wipe the publish folder`
+  inside a `Remove-Item` on the publish folder.
+- No change-log or PR-context comments (`// added for the tooltip fix`,
+  `// changed per review`). That belongs in the commit message, or in this file when it is
+  a durable trap.
+- Prefer one line to a paragraph. Attach it to the surprising line when the surprise is
+  local, not to the member header, and keep `<summary>` XML docs to the contract a caller
+  needs — behaviour and constraints, not a paraphrase of the signature.
+- Delete a comment together with the code it describes; a stale comment is worse than none.
+- Good: `// Registered without NIF_GUID on purpose: the shell leaks the icon. See
+  docs/tray-icon-integrity-issue.md.` Bad: `// Register the tray icon.`
+
 ## Build and restart
 
 When the user asks for a build, use the repository's build script — never a bare

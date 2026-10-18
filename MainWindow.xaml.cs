@@ -125,7 +125,9 @@ public partial class MainWindow : Window
         int height,
         uint flags);
 
-    private void Window_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    // Scoped to the title band on purpose: a drag started on a monitor card would move the
+    // window instead of leaving the pointer on the card it aims at.
+    private void TitleBar_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (e.ChangedButton == MouseButton.Left &&
             e.ButtonState == MouseButtonState.Pressed &&

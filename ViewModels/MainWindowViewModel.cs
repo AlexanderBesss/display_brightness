@@ -226,10 +226,18 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
     {
         // Snapshot on the calling (UI) thread: the read loop below runs on a worker
         // thread and must not walk a collection the UI thread mutates.
+        // Demonstrated support, not current health, decides the retry: a row that
+        // slipped into Unavailable on a wake-up timeout is exactly the case that
+        // needs the retry, while a display that has never answered still pays none.
         HashSet<string> retryOnFailure = Monitors
-            .Where(monitor => monitor.CanAdjustBrightness)
+            .Where(monitor => monitor.HasDemonstratedBrightness)
             .Select(monitor => monitor.Monitor.DevicePath)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // A freshly (re)created row has no reading history, but a stored brightness
+        // is evidence this physical display answered DDC/CI in an earlier session —
+        // typically a reconnect after the link retrained and changed the device path.
+        foreach (string devicePath in _savedSettings.Keys)
+            retryOnFailure.Add(devicePath);
 
         await _displayIo.WaitAsync(_lifetime.Token);
         try
@@ -261,8 +269,9 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
 
         // A DDC/CI read can time out on a panel that is waking or retraining its
         // link. One paced retry keeps a transient timeout from taking control away
-        // from a display that was answering a moment ago. A display that has never
-        // answered is not retried, so it does not pay the delay every cycle.
+        // from a display that was answering a moment ago — and from one that lost
+        // control to exactly such a timeout. A display that has never answered is
+        // not retried, so it does not pay the delay every cycle.
         await Task.Delay(BrightnessReadRetryDelay, _lifetime.Token);
         return TryReadBrightness(monitor);
     }

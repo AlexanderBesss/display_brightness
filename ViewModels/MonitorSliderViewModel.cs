@@ -29,6 +29,7 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
     private bool _isBrightnessWriteRunning;
     private Task<bool> _brightnessWriteTask = Task.FromResult(true);
     private bool _isBrightnessAvailable;
+    private bool _hasDemonstratedBrightness;
     private bool _isTopologyStale;
     private int _connectionVersion;
     private OledCareStatus? _oledStatus;
@@ -36,6 +37,14 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
     private bool _isDisposed;
 
     internal long BrightnessRevision { get; private set; }
+    /// <summary>
+    /// True once this display has answered a brightness read (or arrived with a
+    /// readable initial value). Unlike <see cref="CanAdjustBrightness"/> it is not
+    /// cleared when the display goes into the Unavailable state, so the read
+    /// pipeline keeps giving a transiently silent panel the retry it paid while
+    /// healthy, while a display that never answers still pays no retry delay.
+    /// </summary>
+    internal bool HasDemonstratedBrightness => _hasDemonstratedBrightness;
     internal MonitorInfo Monitor => _monitor;
 
     internal string DisplayName => _monitor.DisplayName;
@@ -164,6 +173,7 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
     {
         _monitor = monitor;
         _isBrightnessAvailable = initialBrightness.HasValue;
+        _hasDemonstratedBrightness = initialBrightness.HasValue;
         _brightnessValue = Math.Clamp(initialBrightness ?? 0, 0, 100);
         _committedBrightness = (int)_brightnessValue;
         if (!initialBrightness.HasValue)
@@ -363,6 +373,7 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
         if (brightness.HasValue)
         {
             _failedReads = 0;
+            _hasDemonstratedBrightness = true;
             if (!_isBrightnessAvailable)
                 AppLog.Info($"brightness readable again for {DisplayName} [{_monitor.DevicePath}]");
             SetBrightnessAvailability(true, string.Empty);

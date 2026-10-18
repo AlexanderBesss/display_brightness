@@ -220,6 +220,54 @@ public sealed class DisplayRecoveryTests
     }
 
     [Fact]
+    public async Task UnavailableRow_KeepsTheRetryBecauseItOnceAnswered()
+    {
+        var display = new FakeDisplay();
+        var time = new AdjustableTime();
+        using var vm = new MainWindowViewModel(
+            display, new FakeStorage(), new NoOled(), new RejectDialog(), time);
+        await vm.InitializationTask;
+
+        // Two consecutive failed cycles take an established display to Unavailable.
+        display.Read = _ => null;
+        time.Now += TimeSpan.FromMinutes(1);
+        await vm.RefreshIfStaleAsync();
+        time.Now += TimeSpan.FromMinutes(1);
+        await vm.RefreshIfStaleAsync();
+        Assert.False(vm.CanAdjustBrightness);
+
+        // A panel that NAKs the first message after the bus idles but answers the
+        // retry must recover without the user clicking Refresh: the retry a healthy
+        // row paid is still paid while the row is Unavailable.
+        int attempts = 0;
+        display.Read = _ => Interlocked.Increment(ref attempts) == 1 ? null : 66;
+        time.Now += TimeSpan.FromMinutes(1);
+        await vm.RefreshIfStaleAsync();
+        Assert.Equal(2, attempts);
+        Assert.True(vm.CanAdjustBrightness);
+        Assert.Equal(66, vm.PrimaryBrightness);
+    }
+
+    [Fact]
+    public async Task StartupReadFailure_IsRetriedWhenTheDisplayHasAStoredBrightness()
+    {
+        // A reconnect that changed the device path produces a brand-new row whose
+        // first read can time out while the panel wakes. The stored brightness from
+        // the previous session marks this physical display as one that answers
+        // DDC/CI, so the initial failure gets the paced retry.
+        var storage = new FakeStorage { Settings = { ["A"] = 40 } };
+        var display = new FakeDisplay();
+        int attempts = 0;
+        display.Read = _ => Interlocked.Increment(ref attempts) == 1 ? null : 61;
+        using var vm = new MainWindowViewModel(
+            display, storage, new NoOled(), new RejectDialog(), new AdjustableTime());
+        await vm.InitializationTask;
+        Assert.Equal(2, attempts);
+        Assert.True(vm.CanAdjustBrightness);
+        Assert.Equal(61, vm.PrimaryBrightness);
+    }
+
+    [Fact]
     public async Task TransientReadFailure_KeepsControlsUntilASecondReadAlsoFails()
     {
         var display = new FakeDisplay();

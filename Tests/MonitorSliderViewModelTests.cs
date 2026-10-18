@@ -7,9 +7,9 @@ namespace DisplayBrightness.Tests;
 public sealed class MonitorSliderViewModelTests
 {
     [Theory]
-    [InlineData(1, 240, 54)]
-    [InlineData(-1, 240, 46)]
-    [InlineData(15, 16, 54)]
+    [InlineData(1, 240, 56)]
+    [InlineData(-1, 240, 44)]
+    [InlineData(15, 16, 56)]
     public async Task PrecisionTouchpadInput_AccumulatesFractionalNotches(int delta, int count, int expected)
     {
         var writes = new List<int>();

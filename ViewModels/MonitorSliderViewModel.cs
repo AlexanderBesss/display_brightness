@@ -249,7 +249,7 @@ public class MonitorSliderViewModel : ViewModelBase, IDisposable
             return Task.FromResult(false);
         }
         // Precision touchpads emit fractions of the standard 120-unit notch.
-        // Preserve those fractions rather than multiplying every tiny event by 2%.
+        // Preserve those fractions rather than multiplying every tiny event by 3%.
         _wheelRemainder += delta;
         int notches = _wheelRemainder / WheelNotch.DetentUnits;
         _wheelRemainder %= WheelNotch.DetentUnits;

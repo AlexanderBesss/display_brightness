@@ -124,17 +124,17 @@
         <Style x:Key="ModernSliderStyle" TargetType="Slider">
             <Setter Property="Foreground" Value="{StaticResource PrimaryBrush}"/>
             <Setter Property="Background" Value="#303543"/>
-            <Setter Property="Height" Value="24"/>
+            <Setter Property="Height" Value="48"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Slider">
                         <Grid>
-                            <Track x:Name="PART_Track" VerticalAlignment="Center" Height="18">
+                            <Track x:Name="PART_Track" VerticalAlignment="Center" Height="36">
                                 <Track.DecreaseRepeatButton>
                                     <RepeatButton Command="Slider.DecreaseLarge" Background="{TemplateBinding Foreground}" BorderThickness="0" Focusable="False">
                                         <RepeatButton.Template>
                                             <ControlTemplate TargetType="RepeatButton">
-                                                <Border Height="7" VerticalAlignment="Center" Background="{TemplateBinding Background}" CornerRadius="3.5"/>
+                                                <Border Height="14" VerticalAlignment="Center" Background="{TemplateBinding Background}" CornerRadius="7"/>
                                             </ControlTemplate>
                                         </RepeatButton.Template>
                                     </RepeatButton>
@@ -143,18 +143,18 @@
                                     <RepeatButton Command="Slider.IncreaseLarge" Background="{TemplateBinding Background}" BorderThickness="0" Focusable="False">
                                         <RepeatButton.Template>
                                             <ControlTemplate TargetType="RepeatButton">
-                                                <Border Height="7" VerticalAlignment="Center" Background="{TemplateBinding Background}" CornerRadius="3.5"/>
+                                                <Border Height="14" VerticalAlignment="Center" Background="{TemplateBinding Background}" CornerRadius="7"/>
                                             </ControlTemplate>
                                         </RepeatButton.Template>
                                     </RepeatButton>
                                 </Track.IncreaseRepeatButton>
                                 <Track.Thumb>
-                                    <Thumb Width="18" Height="18" Cursor="Hand">
+                                    <Thumb Width="36" Height="36" Cursor="Hand">
                                         <Thumb.Template>
                                             <ControlTemplate TargetType="Thumb">
                                                 <Grid>
-                                                    <Ellipse Fill="#241F4B" Width="18" Height="18"/>
-                                                    <Ellipse Fill="White" Width="10" Height="10"/>
+                                                    <Ellipse Fill="#241F4B" Width="36" Height="36"/>
+                                                    <Ellipse Fill="White" Width="20" Height="20"/>
                                                 </Grid>
                                             </ControlTemplate>
                                         </Thumb.Template>

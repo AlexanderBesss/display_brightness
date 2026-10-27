@@ -21,6 +21,7 @@ public partial class App : System.Windows.Application
     private System.Windows.Controls.ContextMenu? _trayMenu;
     private MainWindow? _mainWindow;
     private bool _isExiting;
+    private int _sessionEndingHandled;
     private int _pendingWheelSteps;
     private int _isWheelUpdateQueued;
     private DispatcherTimer? _displayRefreshTimer;
@@ -28,6 +29,7 @@ public partial class App : System.Windows.Application
     private void App_OnStartup(object sender, StartupEventArgs e)
     {
         RegisterGlobalExceptionHandlers();
+        SessionEnding += HandleSessionEnding;
         AppLog.Session(
             $"Brightness started (pid {Environment.ProcessId}, exe {Environment.ProcessPath}, " +
             $"log {AppLog.LogFilePath})");
@@ -60,10 +62,24 @@ public partial class App : System.Windows.Application
 
     // Log only: default crash behaviour is unchanged, so that failures reaching the top
     // of the dispatcher, a background thread, or an unawaited task leave a brightness.log trace.
+    // One exception is fatal instead: the WPF telemetry fault (see HandleSessionEnding).
     private void RegisterGlobalExceptionHandlers()
     {
         DispatcherUnhandledException += (_, args) =>
+        {
             AppLog.Error("unhandled dispatcher exception", args.Exception);
+            // The fault is only reachable from Application.CriticalShutdown, so the app was
+            // already exiting; quit with a success code instead of letting WER pop a
+            // "Hidden Window: Brightness.exe - Application Error" (0xe0434352) dialog.
+            // Application.Shutdown would re-enter the faulting telemetry, so exit directly.
+            if (args.Exception is System.IO.FileNotFoundException &&
+                args.Exception.StackTrace?.Contains(
+                    "System.Windows.Application.CriticalShutdown", StringComparison.Ordinal) == true)
+            {
+                AppLog.Error("wpf telemetry shutdown fault; exiting without crash dialog");
+                Environment.Exit(0);
+            }
+        };
         AppDomain.CurrentDomain.UnhandledException += (_, args) =>
         {
             // ExceptionObject is not always an Exception; log its text instead of losing it to a cast.
@@ -74,6 +90,23 @@ public partial class App : System.Windows.Application
         };
         TaskScheduler.UnobservedTaskException += (_, args) =>
             AppLog.Error("unobserved task exception", args.Exception);
+    }
+
+    // WPF fault (net8.0): Application.CriticalShutdown calls
+    // ControlsTraceLogger.LogUsedControlsDetails() before setting IsShuttingDown, and it
+    // intermittently throws FileNotFoundException — seen 2026-10-27 in brightness.log. On
+    // WM_QUERYENDSESSION that escapes the message pump as raw 0xe0434352, so shutdown shows a
+    // crash dialog instead of the app closing quietly. SessionEnding fires earlier in the same
+    // WmQueryEndSession call, so clean up and exit the process there, never reaching the fault.
+    private void HandleSessionEnding(object sender, SessionEndingCancelEventArgs e)
+    {
+        if (Interlocked.Exchange(ref _sessionEndingHandled, 1) != 0)
+            return;
+
+        _isExiting = true;
+        AppLog.Info($"session ending ({e.ReasonSessionEnding}); exiting before wpf shutdown fault");
+        CleanupForExit();
+        Environment.Exit(0);
     }
 
     private static void LogStartupEvent(string message) =>
@@ -368,10 +401,15 @@ public partial class App : System.Windows.Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        CleanupForExit();
+        base.OnExit(e);
+    }
+
+    private void CleanupForExit()
+    {
         _displayRefreshTimer?.Stop();
         (_mainWindow?.DataContext as MainWindowViewModel)?.Dispose();
         DisposeTrayIcon();
-        base.OnExit(e);
     }
 
     [StructLayout(LayoutKind.Sequential)]

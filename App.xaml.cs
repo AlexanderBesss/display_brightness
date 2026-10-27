@@ -92,7 +92,7 @@ public partial class App : System.Windows.Application
             AppLog.Error("unobserved task exception", args.Exception);
     }
 
-    // WPF fault (net8.0): Application.CriticalShutdown calls
+    // WPF fault (still unfixed through net10.0): Application.CriticalShutdown calls
     // ControlsTraceLogger.LogUsedControlsDetails() before setting IsShuttingDown, and it
     // intermittently throws FileNotFoundException — seen 2026-10-27 in brightness.log. On
     // WM_QUERYENDSESSION that escapes the message pump as raw 0xe0434352, so shutdown shows a

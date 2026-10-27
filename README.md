@@ -6,7 +6,7 @@ A lightweight Windows tray application for adjusting external monitor brightness
 
 Download `Brightness.exe` from the [latest GitHub release](../../releases/latest).
 The published application is a small, framework-dependent executable and requires
-the .NET 8 Desktop Runtime (x64).
+the .NET 10 Desktop Runtime (x64).
 
 ## Features
 
@@ -27,7 +27,7 @@ the .NET 8 Desktop Runtime (x64).
 ## Requirements
 
 - Windows 10/11
-- .NET 8 Desktop Runtime (x64)
+- .NET 10 Desktop Runtime (x64)
 - Administrator privileges (required for display brightness control)
 - The monitor's USB upstream cable for MSI OLED Care controls
 

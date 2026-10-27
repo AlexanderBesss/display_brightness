@@ -1,7 +1,7 @@
 # Agent notes
 
 Windows tray app for external-monitor brightness. WPF UI with WinForms interop for the
-tray icon. `net8.0-windows`, `AssemblyName=Brightness`, `RootNamespace=DisplayBrightness`.
+tray icon. `net10.0-windows`, `AssemblyName=Brightness`, `RootNamespace=DisplayBrightness`.
 
 ## Layout
 

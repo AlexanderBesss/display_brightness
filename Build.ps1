@@ -1,5 +1,5 @@
 # Brightness - Production Build Script
-# Requires: .NET 8 SDK
+# Requires: .NET 10 SDK
 
 $ErrorActionPreference = "Stop"
 $ProjectDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -16,7 +16,7 @@ try {
     Write-Host "[1/4] Checking .NET SDK..." -ForegroundColor Yellow
     $dotnetVersion = dotnet --version
     if (-not $dotnetVersion) {
-        Write-Host "ERROR: .NET SDK not found. Install .NET 8 SDK from https://dotnet.microsoft.com/download" -ForegroundColor Red
+        Write-Host "ERROR: .NET SDK not found. Install .NET 10 SDK from https://dotnet.microsoft.com/download" -ForegroundColor Red
         throw ".NET SDK not found"
     }
     Write-Host "  .NET SDK version: $dotnetVersion" -ForegroundColor Green
@@ -73,7 +73,7 @@ try {
     Write-Host "  Build successful!" -ForegroundColor Green
     Write-Host "  Output: $PublishDir" -ForegroundColor Green
     Write-Host "========================================" -ForegroundColor Green
-    Write-Host "  Requires: .NET 8 Desktop Runtime x64" -ForegroundColor Yellow
+    Write-Host "  Requires: .NET 10 Desktop Runtime x64" -ForegroundColor Yellow
 
     $exe = Get-ChildItem "$PublishDir\Brightness.exe"
     if ($exe) {
